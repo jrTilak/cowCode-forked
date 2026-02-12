@@ -7,10 +7,12 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "start": "node index.js",
-    "auth": "node index.js --auth-only"
+    "auth": "node index.js --auth-only",
+    "cron": "node cron/cli.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",
+    "croner": "^10.0.1",
     "dotenv": "^17.2.4",
     "pino": "^9.5.0",
     "qrcode-terminal": "^0.12.0"

@@ -106,13 +106,14 @@ function loadConfig() {
   };
 }
 
-function callOne(messages, { baseUrl, apiKey, model, maxTokens }) {
+function callOne(messages, { baseUrl, apiKey, model, maxTokens }, tools = null) {
   const url = (baseUrl || '').replace(/\/$/, '') + '/chat/completions';
   const body = {
     model,
     messages,
     max_tokens: maxTokens,
     stream: false,
+    ...(tools && tools.length > 0 ? { tools } : {}),
   };
   const headers = {
     'Content-Type': 'application/json',
@@ -147,6 +148,92 @@ export async function chat(messages) {
     }
   }
   throw lastError || new Error('No LLM configured');
+}
+
+/**
+ * OpenAI-format tool: { type: "function", function: { name, description, parameters } }.
+ * parameters is JSON Schema (e.g. { type: "object", properties: {...} }).
+ *
+ * @param {Array<{ role: string, content?: string, tool_calls?: Array<{ id: string, type: string, function: { name: string, arguments: string } }> }>} messages
+ * @param {Array<{ type: 'function', function: { name: string, description: string, parameters: object } }>} tools - OpenAI tools array
+ * @returns {Promise<{ content: string, toolCalls: Array<{ id: string, name: string, arguments: string }> }>}
+ */
+export async function chatWithTools(messages, tools) {
+  const { models } = loadConfig();
+  let lastError;
+  for (const opts of models) {
+    const label = opts.model || opts.baseUrl?.replace(/^https?:\/\//, '').slice(0, 20) || 'unknown';
+    try {
+      const res = await callOne(messages, opts, tools);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`LLM request failed ${res.status}: ${text}`);
+      }
+      const data = await res.json();
+      const msg = data.choices?.[0]?.message;
+      if (!msg) throw new Error('No message in LLM response');
+      const content = (msg.content && String(msg.content).trim()) || '';
+      const rawCalls = msg.tool_calls || [];
+      const toolCalls = rawCalls.map((tc) => ({
+        id: tc.id || '',
+        name: tc.function?.name || '',
+        arguments: typeof tc.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}),
+      }));
+      console.log('[LLM] used:', label, toolCalls.length ? `(${toolCalls.length} tool call(s))` : '');
+      return { content, toolCalls };
+    } catch (err) {
+      console.log('[LLM] try failed:', label, err.message);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('No LLM configured');
+}
+
+/**
+ * Classify user intent for routing: CHAT (normal reply) or SCHEDULE (user wants to set/list/remove reminders).
+ * Uses one short LLM call. Most messages should be CHAT.
+ * @param {string} userMessage
+ * @returns {Promise<'CHAT'|'SCHEDULE'>}
+ */
+const INTENT_TIMEOUT_MS = 15_000;
+
+export async function classifyIntent(userMessage) {
+  const messages = [
+    {
+      role: 'system',
+      content: `Reply with exactly one word: CHAT or SCHEDULE.
+
+SCHEDULE = user wants to send or receive a message at a future time, or manage reminders. Examples: "send me X in 5 minutes", "remind me to Y after one hour", "can you send me a hi message after one minute?", "list my reminders", "what's scheduled?", "cancel reminder Z". Any request involving a future time (in X min, after Y hours, at 8am, tomorrow) for a message or reminder = SCHEDULE.
+
+CHAT = greetings (Hi, Hello), general questions, conversation, or anything that does NOT ask for a future message/reminder or to list/remove reminders.`,
+    },
+    { role: 'user', content: (userMessage || '').trim() || 'Hi' },
+  ];
+  const { models } = loadConfig();
+  let lastError;
+  for (const opts of models) {
+    const label = opts.model || opts.baseUrl?.replace(/^https?:\/\//, '').slice(0, 20) || 'unknown';
+    try {
+      const res = await Promise.race([
+        callOne(messages, { ...opts, maxTokens: 20 }, null),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('intent timeout')), INTENT_TIMEOUT_MS)),
+      ]);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`LLM request failed ${res.status}: ${text}`);
+      }
+      const data = await res.json();
+      const content = (data.choices?.[0]?.message?.content || '').trim().toUpperCase();
+      if (content.includes('SCHEDULE')) return 'SCHEDULE';
+      return 'CHAT';
+    } catch (err) {
+      console.log('[LLM] intent try failed:', label, err.message);
+      lastError = err;
+    }
+  }
+  // If all models failed or timed out, default to CHAT so we still try to reply
+  if (lastError) return 'CHAT';
+  throw new Error('No LLM configured');
 }
 
 export { loadConfig, PRESETS };

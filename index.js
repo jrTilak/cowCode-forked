@@ -16,14 +16,17 @@ const {
   extractMessageContent,
   areJidsSameUser,
 } = Baileys;
-import { chat as llmChat, loadConfig } from './llm.js';
+import { chat as llmChat, chatWithTools, classifyIntent, loadConfig } from './llm.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { rmSync, mkdirSync, existsSync } from 'fs';
 import pino from 'pino';
+import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
+import { getEnabledTools, executeSkill } from './skills/registry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = join(__dirname, 'auth_info');
+const CRON_STORE_PATH = join(__dirname, 'cron', 'jobs.json');
 
 if (typeof makeWASocket !== 'function') {
   throw new Error('Baileys makeWASocket not found. Check @whiskeysockets/baileys version.');
@@ -152,20 +155,170 @@ async function main() {
   console.log('LLM config:', config.models.length > 1
     ? `${config.models.length} models (priority): ${config.models.map(m => m.model).join(' → ')}`
     : { baseUrl: first.baseUrl, model: first.model });
+  const { getSkillsConfig } = await import('./skills/registry.js');
+  const skillsConfig = getSkillsConfig();
+  console.log('Skills enabled:', skillsConfig.enabled?.length ? skillsConfig.enabled.join(', ') : 'cron (default)');
 
-  sock.ev.on('connection.update', (u) => {
-    if (u.connection === 'open') {
-      console.log('WhatsApp connected. Self JID:', sock.user?.id ?? 'unknown');
+  const MAX_REPLIED_IDS = 500;
+  const MAX_OUR_SENT_IDS = 200;
+
+  // Agent logic (shared by real socket handler and --test mode)
+  const tools = getEnabledTools();
+  const chatSystemPrompt = 'You are a helpful assistant. Reply concisely in the same language the user uses. Do not use <think> or any thinking/reasoning blocks—output only your final reply.';
+  function getScheduleSystemPrompt() {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const in1min = new Date(now + 60_000).toISOString();
+    const in2min = new Date(now + 120_000).toISOString();
+    const in3min = new Date(now + 180_000).toISOString();
+    return `You are a helpful assistant with access to the cron tool for reminders. Reply concisely in the same language the user uses. Do not use <think> or any thinking/reasoning blocks—output only your final reply. Use the cron tool to add, list, or remove reminders as requested. For multiple reminders in one message, call the cron tool once per reminder. Each call must have a different schedule.at time.
+
+Current time: ${nowIso}. Use future ISO 8601 for "at". Examples: "in 1 minute" = ${in1min}; "in 2 minutes" = ${in2min}; "in 3 minutes" = ${in3min}. For "every one minute for the next three minutes" you MUST call cron add THREE times: first at ${in1min}, second at ${in2min}, third at ${in3min}. Never use the same "at" for multiple jobs.
+
+Important: job.message must be exactly what the user asked to receive (e.g. "fun fact" / "Give me a fun fact"—do not substitute "Hello, how can I assist").`;
+  }
+  async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef) {
+    console.log('[agent] runAgentWithSkills started for:', text.slice(0, 60));
+    try {
+      await sock.sendPresenceUpdate('composing', jid);
+    } catch (_) {}
+    let intent = 'CHAT';
+    try {
+      intent = await classifyIntent(text);
+      console.log('[agent] intent:', intent);
+    } catch (err) {
+      console.error('[agent] intent classification failed:', err.message);
     }
-    if (u.connection === 'close') console.log('WhatsApp disconnected.');
+    const useTools = intent === 'SCHEDULE' && tools.length > 0;
+    if (useTools) {
+      const immediateReply = "[CowCode] Got it, one moment.";
+      const immediateSent = await sock.sendMessage(jid, { text: immediateReply });
+      if (immediateSent?.key?.id && ourSentIdsRef?.current) {
+        ourSentIdsRef.current.add(immediateSent.key.id);
+        if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
+          const first = ourSentIdsRef.current.values().next().value;
+          if (first) ourSentIdsRef.current.delete(first);
+        }
+      }
+      lastSentByJidMap.set(jid, immediateReply);
+      console.log('[replied] (immediate)');
+    }
+    const systemPrompt = useTools ? getScheduleSystemPrompt() : chatSystemPrompt;
+    const ctx = {
+      storePath: CRON_STORE_PATH,
+      jid,
+      scheduleOneShot,
+      startCron: () => startCron({ sock, selfJid: selfJidForCron, storePath: CRON_STORE_PATH }),
+    };
+    let messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: text },
+    ];
+    let finalContent = '';
+    const maxToolRounds = 1;
+    for (let round = 0; round <= maxToolRounds; round++) {
+      if (!useTools) {
+        const rawReply = await llmChat(messages);
+        finalContent = stripThinking(rawReply);
+        break;
+      }
+      const { content, toolCalls } = await chatWithTools(messages, tools);
+      if (!toolCalls || toolCalls.length === 0) {
+        finalContent = content || '';
+        break;
+      }
+      const assistantMsg = {
+        role: 'assistant',
+        content: content || null,
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      };
+      messages = messages.concat(assistantMsg);
+      for (const tc of toolCalls) {
+        let args = {};
+        try {
+          args = JSON.parse(tc.arguments || '{}');
+        } catch {
+          args = {};
+        }
+        const skillId = tc.name;
+        console.log('[agent] tool call:', skillId, tc.arguments?.slice(0, 80));
+        const result = await executeSkill(skillId, ctx, args);
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: result,
+        });
+      }
+    }
+    const textToSend = finalContent && stripThinking(finalContent).trim()
+      ? '[CowCode] ' + stripThinking(finalContent).trim()
+      : "[CowCode] Done. Anything else?";
+    const sent = await sock.sendMessage(jid, { text: textToSend });
+    if (sent?.key?.id && ourSentIdsRef?.current) {
+      ourSentIdsRef.current.add(sent.key.id);
+      if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
+        const first = ourSentIdsRef.current.values().next().value;
+        if (first) ourSentIdsRef.current.delete(first);
+      }
+    }
+    lastSentByJidMap.set(jid, textToSend);
+    console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
+  }
+
+  // --test: run main code path once with a fake socket, write to real cron/jobs.json then exit
+  if (process.argv.includes('--test')) {
+    const testIdx = process.argv.indexOf('--test');
+    const testMsg = process.argv[testIdx + 1] || process.env.TEST_MESSAGE || 'Send me hello in 1 minute';
+    const mockSock = {
+      sendMessage: async () => ({ key: { id: 'test-' + Date.now() } }),
+      sendPresenceUpdate: async () => {},
+      readMessages: async () => {},
+    };
+    const lastSent = new Map();
+    const sentIds = { current: new Set() };
+    console.log('[test] Running main code path with message:', testMsg.slice(0, 60));
+    await runAgentWithSkills(mockSock, 'test@s.whatsapp.net', testMsg, lastSent, 'test@s.whatsapp.net', sentIds);
+    console.log('[test] Done. Check cron/jobs.json.');
+    process.exit(0);
+  }
+
+  console.log('Connecting to WhatsApp…');
+  sock.ev.on('connection.update', (u) => {
+    if (u.connection != null) {
+      console.log('[connection]', u.connection);
+    }
+    if (u.connection === 'open') {
+      const sid = sock.user?.id ?? selfJid;
+      if (sid) selfJid = sid;
+      console.log('WhatsApp connected. Self JID:', sid ?? 'unknown');
+      if (sid) {
+        startCron({ sock, selfJid: sid, storePath: join(__dirname, 'cron', 'jobs.json') });
+      }
+    }
+    if (u.connection === 'close') {
+      stopCron();
+      const reason = u.lastDisconnect?.error;
+      const code = reason?.output?.statusCode ?? reason?.statusCode;
+      const msg = reason?.message || reason?.output?.payload?.message;
+      const why = DISCONNECT_REASONS[code] || (code != null ? `Code ${code}` : 'unknown');
+      console.log('WhatsApp disconnected:', why);
+      if (msg) console.log('  →', msg);
+      if (code === 401 || code === 403 || code === 428) {
+        console.log('  → Run: pnpm run auth   to re-link your device.');
+      }
+    }
   });
 
-  // Message flow: intercept incoming → local LLM → reply once per message. No tools/schema.
+  // Message flow: intercept incoming → immediate reply → schedule/LLM in background.
   let selfJid = sock.user?.id;
   sock.ev.on('creds.update', () => { selfJid = sock.user?.id; });
   const repliedIds = new Set();
   const lastSentByJid = new Map();
-  const MAX_REPLIED_IDS = 500;
+  const ourSentMessageIds = new Set(); // IDs of messages we sent (to ignore echo in self-chat)
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const m of messages ?? []) {
@@ -173,18 +326,24 @@ async function main() {
       if (isJidBroadcast(m.key.remoteJid)) continue;
 
       selfJid = selfJid ?? sock.user?.id;
-      const isSelfChat = selfJid && areJidsSameUser(m.key.remoteJid, selfJid);
-      if (m.key.fromMe && !isSelfChat) continue;
 
       const content = extractMessageContent(m.message);
       const text = (content?.conversation || content?.extendedTextMessage?.text || '').trim();
       if (!text) continue;
 
       const jid = m.key.remoteJid;
-      if (m.key.fromMe && isSelfChat && text === lastSentByJid.get(jid)) continue;
+      // Skip only when this is clearly our echo: fromMe and the text exactly matches what we last sent to this chat.
+      const lastWeSent = lastSentByJid.get(jid);
+      if (m.key.fromMe && typeof lastWeSent === 'string' && text === lastWeSent) {
+        console.log('[skip] our echo (fromMe, text matches last sent)');
+        continue;
+      }
 
       const msgKey = m.key.id ? `${jid}:${m.key.id}` : null;
-      if (msgKey && repliedIds.has(msgKey)) continue;
+      if (msgKey && repliedIds.has(msgKey)) {
+        console.log('[skip] already replied to this message id');
+        continue;
+      }
       if (msgKey) {
         repliedIds.add(msgKey);
         if (repliedIds.size > MAX_REPLIED_IDS) {
@@ -200,20 +359,11 @@ async function main() {
             await sock.readMessages([{ remoteJid: jid, id: m.key.id, participant: m.key.participant, fromMe: false }]);
           } catch (_) {}
         }
-        try {
-          await sock.sendPresenceUpdate('composing', jid);
-        } catch (_) {}
-        const rawReply = await llmChat([
-          { role: 'system', content: 'You are a helpful assistant. Reply concisely in the same language the user uses. Do not use <think> or any thinking/reasoning blocks in your response—output only your final reply, nothing else.' },
-          { role: 'user', content: text },
-        ]);
-        const reply = stripThinking(rawReply);
-        if (reply) {
-          const textToSend = '[CowCode] ' + reply;
-          await sock.sendMessage(jid, { text: textToSend });
-          lastSentByJid.set(jid, textToSend);
-          console.log('[replied]');
-        }
+
+        runAgentWithSkills(sock, jid, text, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }).catch((err) => {
+          console.error('Background agent error:', err.message);
+          sock.sendMessage(jid, { text: `[CowCode] Error: ${err.message}` }).catch(() => {});
+        });
       } catch (err) {
         console.error('LLM error:', err.message);
         await sock.sendMessage(jid, { text: `[CowCode] Error: ${err.message}` });
@@ -226,6 +376,7 @@ function stripThinking(text) {
   if (!text || typeof text !== 'string') return '';
   return text
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*/gi, '')
     .replace(/<\/think>/gi, '')
     .trim();
 }

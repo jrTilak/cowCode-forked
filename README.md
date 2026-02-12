@@ -63,10 +63,40 @@ For **cloud** providers set `provider` and `apiKey`; you can set **`model`** in 
 **Built-in providers:**  
 `openai`, `grok` / `xai`, `together`, `deepseek`, `ollama`, `lmstudio`. For **local** (`lmstudio`, `ollama`) you can set `baseUrl` in config; for others the URL is preset and not configurable.
 
+**Skills (tools the assistant can use):**  
+Scheduling and other capabilities are implemented as **skills**. In `config.json`, `skills.enabled` is an array of skill ids. By default only **cron** is enabled. To add a future skill (e.g. search), add it to `skills.enabled` and any per-skill options under `skills.<id>` (e.g. `skills.search`). Skills not in `skills.enabled` are not loaded.
+
+```json
+"skills": {
+  "enabled": ["cron"],
+  "cron": {},
+  "search": {}
+}
+```
+
 ### Where to send messages
 
 - **Ideal for testing:** Open **Message yourself** (your number at the top of the chat list, or “Note to self”). Send a message there; the bot will reply in that same chat.
 - **Otherwise:** Any chat where someone else messages the linked number (e.g. a contact messages you); the bot replies in that chat.
+
+### Cron: scheduled messages to WhatsApp
+
+The **cron** skill is enabled by default. You can say things like “remind me to X in 5 minutes”, “send me hello in 1 minute and goodbye in 2 minutes”, or “list my reminders”; the assistant uses the cron tool to add, list, or remove jobs. You can also manage jobs from the CLI:
+
+1. **Add a job** (cron expression = min hour day month weekday; optional timezone):
+
+   ```bash
+   pnpm run cron add --name "Morning brief" --cron "0 8 * * *" --message "Summarize today's plan in 3 bullet points."
+   pnpm run cron add --name "Reminder" --cron "0 9 * * 1" --tz "America/New_York" --message "Weekly standup in 1 hour."
+   ```
+
+2. **List jobs:** `pnpm run cron list`
+
+3. **Remove a job:** `pnpm run cron remove <job-id>`
+
+4. **Enable/disable:** `pnpm run cron enable <job-id>` or `pnpm run cron disable <job-id>`
+
+Jobs are stored in `cron/jobs.json`. **One-shot jobs** (e.g. "send me hi in 30 seconds") are **removed from the file after they run**, so `jobs.json` may be empty even though the cron sent the message—check the terminal for `[cron] One-shot completed and removed from store`. The runner starts when WhatsApp connects (`pnpm start`). By default the reply is sent to your "Message yourself" chat; use `--jid <number@s.whatsapp.net>` to send to a specific chat.
 
 ### If linking fails ("can't link device")
 
