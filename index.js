@@ -1,8 +1,9 @@
 /**
  * WhatsApp + configurable LLM. On incoming message → LLM reply → send back.
- * No tools. Switch backends via config.json or env (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL).
+ * Config values come from .env (see .env.example). No secrets in config.json.
  */
 
+import 'dotenv/config';
 import * as Baileys from '@whiskeysockets/baileys';
 
 const makeWASocket =
@@ -147,7 +148,10 @@ async function main() {
   sock.ev.on('creds.update', saveCreds);
 
   const config = loadConfig();
-  console.log('LLM config:', { baseUrl: config.baseUrl, model: config.model });
+  const first = config.models[0];
+  console.log('LLM config:', config.models.length > 1
+    ? `${config.models.length} models (priority): ${config.models.map(m => m.model).join(' → ')}`
+    : { baseUrl: first.baseUrl, model: first.model });
 
   sock.ev.on('connection.update', (u) => {
     if (u.connection === 'open') {

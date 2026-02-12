@@ -1,6 +1,6 @@
 /**
- * Configurable LLM client. Uses config.json; env overrides: LLM_BASE_URL, LLM_API_KEY, LLM_MODEL.
- * Works with LM Studio, Ollama, OpenAI, or any OpenAI-compatible API.
+ * Configurable LLM client. All config values are read from .env (keys in config.json
+ * are env var names). Supports preset providers and multiple models with priority.
  */
 
 import { readFileSync } from 'fs';
@@ -9,16 +9,116 @@ import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/** If config value is an env var name (e.g. "LLM_API_KEY"), return process.env[value]; else return value. */
+function fromEnv(val) {
+  if (val == null) return val;
+  const s = String(val).trim();
+  if (process.env[s] !== undefined) return process.env[s];
+  return val;
+}
+
+/** Preset base URLs for standard providers (OpenAI-compatible). */
+const PRESETS = {
+  openai: 'https://api.openai.com/v1',
+  grok: 'https://api.x.ai/v1',
+  xai: 'https://api.x.ai/v1',
+  together: 'https://api.together.xyz/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  ollama: 'http://127.0.0.1:11434/v1',
+  lmstudio: 'http://127.0.0.1:1234/v1',
+};
+
+/** Only local providers can have baseUrl in config.json; others use preset only. */
+const LOCAL_PROVIDERS = new Set(['lmstudio', 'ollama']);
+
+/** Env var name for cloud model (e.g. openai -> OPENAI_MODEL). Used when model is omitted in config. */
+function cloudModelEnv(provider) {
+  if (!provider) return undefined;
+  const p = String(provider).toLowerCase();
+  const name = p === 'xai' ? 'GROK' : p.toUpperCase();
+  return `${name}_MODEL`;
+}
+
+/** Default model per provider when the *_MODEL env var is not set. */
+const DEFAULT_CLOUD_MODELS = {
+  openai: 'gpt-4o-mini',
+  grok: 'grok-2',
+  xai: 'grok-2',
+  together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+  deepseek: 'deepseek-chat',
+};
+
 function loadConfig() {
   const path = join(__dirname, 'config.json');
   const raw = readFileSync(path, 'utf8');
   const config = JSON.parse(raw);
+  const llm = config.llm || {};
+  const defaultMaxTokens = Number(fromEnv(llm.maxTokens)) || 2048;
+
+  if (Array.isArray(llm.models) && llm.models.length > 0) {
+    let models = llm.models.map((entry, i) => {
+      const provider = entry.provider && String(entry.provider).toLowerCase();
+      const isLocal = provider && LOCAL_PROVIDERS.has(provider);
+      const baseUrl = isLocal
+        ? (fromEnv(entry.baseUrl) || entry.baseUrl || (provider && PRESETS[provider]))
+        : (entry.provider && PRESETS[provider]);
+      const apiKey = fromEnv(entry.apiKey) ?? (i === 0 ? fromEnv('LLM_API_KEY') : undefined);
+      const modelRaw = entry.model != null ? fromEnv(entry.model) : undefined;
+      let model = modelRaw || (isLocal ? 'local' : fromEnv(cloudModelEnv(provider))) || (i === 0 ? fromEnv('LLM_MODEL') : undefined);
+      if (!isLocal && (!model || model === cloudModelEnv(provider))) {
+        model = DEFAULT_CLOUD_MODELS[provider] || model;
+      }
+      const maxTokens = Number(fromEnv(entry.maxTokens)) || defaultMaxTokens;
+      const priority = entry.priority === true || entry.priority === 1 ||
+        String(entry.priority).toLowerCase() === 'true' || entry.priority === '1';
+      return {
+        baseUrl: baseUrl || PRESETS.lmstudio,
+        apiKey: apiKey ?? 'not-needed',
+        model: model || 'local',
+        maxTokens,
+        priority,
+      };
+    });
+    // When any model has priority, try it first regardless of position in config.
+    const priorityIndex = models.findIndex((m) => m.priority);
+    if (priorityIndex >= 0) {
+      const [priorityModel] = models.splice(priorityIndex, 1);
+      models = [priorityModel, ...models];
+    }
+    models = models.map(({ priority: _p, ...m }) => m);
+    return { models, maxTokens: defaultMaxTokens };
+  }
+
+  const baseUrl = fromEnv('LLM_BASE_URL') || fromEnv(llm.baseUrl);
+  const apiKey = fromEnv('LLM_API_KEY') ?? fromEnv(llm.apiKey);
+  const model = fromEnv('LLM_MODEL') || fromEnv(llm.model);
+  const maxTokens = Number(fromEnv(llm.maxTokens)) || 2048;
   return {
-    baseUrl: process.env.LLM_BASE_URL || config.llm.baseUrl,
-    apiKey: process.env.LLM_API_KEY ?? config.llm.apiKey,
-    model: process.env.LLM_MODEL || config.llm.model,
-    maxTokens: config.llm.maxTokens ?? 2048,
+    models: [
+      {
+        baseUrl: baseUrl || PRESETS.lmstudio,
+        apiKey: apiKey ?? 'not-needed',
+        model: model || 'local',
+        maxTokens,
+      },
+    ],
+    maxTokens,
   };
+}
+
+function callOne(messages, { baseUrl, apiKey, model, maxTokens }) {
+  const url = (baseUrl || '').replace(/\/$/, '') + '/chat/completions';
+  const body = {
+    model,
+    messages,
+    max_tokens: maxTokens,
+    stream: false,
+  };
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(apiKey && apiKey !== 'not-needed' && { Authorization: `Bearer ${apiKey}` }),
+  };
+  return fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
 }
 
 /**
@@ -26,36 +126,27 @@ function loadConfig() {
  * @returns {Promise<string>}
  */
 export async function chat(messages) {
-  const { baseUrl, apiKey, model, maxTokens } = loadConfig();
-  const url = baseUrl.replace(/\/$/, '') + '/chat/completions';
-
-  const body = {
-    model,
-    messages,
-    max_tokens: maxTokens,
-    stream: false,
-  };
-
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(apiKey && apiKey !== 'not-needed' && { Authorization: `Bearer ${apiKey}` }),
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`LLM request failed ${res.status}: ${text}`);
+  const { models } = loadConfig();
+  let lastError;
+  for (const opts of models) {
+    const label = opts.model || opts.baseUrl?.replace(/^https?:\/\//, '').slice(0, 20) || 'unknown';
+    try {
+      const res = await callOne(messages, opts);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`LLM request failed ${res.status}: ${text}`);
+      }
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (content == null) throw new Error('No content in LLM response');
+      console.log('[LLM] used:', label);
+      return content.trim();
+    } catch (err) {
+      console.log('[LLM] try failed:', label, err.message);
+      lastError = err;
+    }
   }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (content == null) throw new Error('No content in LLM response');
-  return content.trim();
+  throw lastError || new Error('No LLM configured');
 }
 
-export { loadConfig };
+export { loadConfig, PRESETS };
