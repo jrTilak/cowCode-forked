@@ -131,48 +131,43 @@ async function onboarding() {
 
   const baseUrl = await promptWithDefault('Local LLM base URL (e.g. LM Studio)', defaultBaseUrl || '');
 
-  // Cloud LLM: will they use one, and which provider?
-  const useCloud = await ask('Will you use a cloud LLM (OpenAI, Grok, Anthropic)? (y/n, Enter=no, q=quit): ');
-  checkQuit(useCloud);
-  const useCloudYes = useCloud && useCloud.toLowerCase() === 'y';
-
+  // Cloud LLM: ask provider directly, with skip
   let llm1Key = env.LLM_1_API_KEY || '';
   let llm2Key = env.LLM_2_API_KEY || '';
   let llm3Key = env.LLM_3_API_KEY || '';
 
-  if (useCloudYes) {
-    let provider;
-    try {
-      const select = (await import('@inquirer/select')).default;
-      provider = await select({
-        message: 'Which provider?',
-        choices: [
-          { name: 'OpenAI', value: 'openai' },
-          { name: 'Grok', value: 'grok' },
-          { name: 'Anthropic', value: 'anthropic' },
-          { name: 'Quit', value: 'quit' },
-        ],
-      });
-    } catch (err) {
-      if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
-        const answer = await ask('Which provider? (openai / grok / anthropic, q to quit): ');
-        checkQuit(answer);
-        provider = (answer || '').trim().toLowerCase() || 'openai';
-      } else {
-        throw err;
-      }
+  let provider;
+  try {
+    const select = (await import('@inquirer/select')).default;
+    provider = await select({
+      message: 'Cloud LLM provider?',
+      choices: [
+        { name: 'OpenAI', value: 'openai' },
+        { name: 'Grok', value: 'grok' },
+        { name: 'Anthropic', value: 'anthropic' },
+        { name: 'Skip', value: 'skip' },
+        { name: 'Quit', value: 'quit' },
+      ],
+    });
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+      const answer = await ask('Cloud LLM provider? (openai / grok / anthropic / skip, q to quit): ');
+      checkQuit(answer);
+      provider = (answer || '').trim().toLowerCase() || 'skip';
+    } else {
+      throw err;
     }
-    if (provider === 'quit') {
-      console.log('Quit.');
-      process.exit(0);
-    }
-    if (provider === 'openai') {
-      llm1Key = await promptSecret('OpenAI API key', env.LLM_1_API_KEY || '');
-    } else if (provider === 'grok') {
-      llm2Key = await promptSecret('Grok API key', env.LLM_2_API_KEY || '');
-    } else if (provider === 'anthropic') {
-      llm3Key = await promptSecret('Anthropic API key', env.LLM_3_API_KEY || '');
-    }
+  }
+  if (provider === 'quit') {
+    console.log('Quit.');
+    process.exit(0);
+  }
+  if (provider === 'openai') {
+    llm1Key = await promptSecret('OpenAI API key', env.LLM_1_API_KEY || '');
+  } else if (provider === 'grok') {
+    llm2Key = await promptSecret('Grok API key', env.LLM_2_API_KEY || '');
+  } else if (provider === 'anthropic') {
+    llm3Key = await promptSecret('Anthropic API key', env.LLM_3_API_KEY || '');
   }
 
   const braveKey = await promptSecret('Brave Search API key – optional', env.BRAVE_API_KEY || '');
