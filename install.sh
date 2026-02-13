@@ -15,15 +15,13 @@ curl -fsSL "$TARBALL" | tar xz
 mv "$EXTRACTED" "$DIR"
 cd "$DIR"
 
+echo "Running setup..."
 if [ -t 0 ]; then
-  echo "Running setup..."
   node setup.js
+elif [ -e /dev/tty ]; then
+  node setup.js < /dev/tty
 else
-  echo ""
-  echo "Download complete. Setup needs an interactive terminal."
-  echo "Run:  cd $DIR && node setup.js"
-  echo ""
-  echo "Or install deps only: cd $DIR && npm install && npm start"
+  echo "No terminal. Run: cd $DIR && node setup.js"
 fi
 
 echo ""
