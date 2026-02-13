@@ -208,7 +208,9 @@ async function main() {
 
 Use the browser tool to get current information: call action "search" with "query" set to the user's search (e.g. current time, weather, recent trends, latest news). Then answer based on the returned content. If the user gave a specific URL, use action "navigate" with "url".
 
-CRITICAL - Give the exact data in your reply: When the user asks for things like current time, weather, today's date, or sunny/rainy conditions, state the actual value from the search results (e.g. "The time is 3:45 PM IST", "It's 28°C and sunny in Mumbai", "Today is 12 February 2025"). Do NOT tell them to "check the link", "see the results above", or "search for it"—answer with the concrete time, weather, or fact directly.`;
+CRITICAL - Give the exact data in your reply:
+- Time, weather, date: State the actual value from the results (e.g. "The time is 3:45 PM IST", "It's 28°C and sunny"). Do NOT say "check the link" or "search for it".
+- News/headlines: When the user asks for top/latest news or headlines, LIST the actual headlines from the tool result (e.g. "1. Headline one. 2. Headline two. ..."). Do NOT reply with only a disclaimer (e.g. "headlines may change")—always include the list of headlines.`;
   }
   function getScheduleSystemPrompt() {
     const now = Date.now();

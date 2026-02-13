@@ -8,6 +8,20 @@ WhatsApp bot that replies using your local or cloud LLM (LM Studio, Ollama, Open
 
 ## 1. Get the repo
 
+**Option A – one-liner (download + setup in one go):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/main/install.sh | bash
+```
+
+**Option B – curl then setup:**
+
+```bash
+curl -sL https://github.com/bishwashere/cowCode/archive/refs/heads/main.tar.gz | tar xz && cd cowCode-main
+```
+
+**Option C – git clone:**
+
 ```bash
 git clone https://github.com/bishwashere/cowCode
 cd cowCode
