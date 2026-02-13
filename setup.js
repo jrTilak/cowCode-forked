@@ -27,10 +27,18 @@ function ask(question) {
   });
 }
 
-/** Prompt with full default value shown (e.g. for base URL). */
+function checkQuit(answer) {
+  if (answer && answer.toLowerCase() === 'q') {
+    console.log('Quit.');
+    process.exit(0);
+  }
+}
+
+/** Prompt with full default value shown (e.g. for base URL). Press q to quit. */
 async function promptWithDefault(prompt, defaultVal) {
   const def = defaultVal ? ` [${defaultVal}]` : '';
-  const answer = await ask(`${prompt}${def}: `);
+  const answer = await ask(`${prompt}${def} (q to quit): `);
+  checkQuit(answer);
   return answer || defaultVal || '';
 }
 
@@ -42,18 +50,19 @@ function maskSecret(val) {
   return s.slice(0, 12) + '***';
 }
 
-/** Prompt for a secret; if already set, show masked hint (e.g. sk-proj-Qx***) and keep value on Enter. */
+/** Prompt for a secret; if already set, show masked hint. Press q to quit. */
 async function promptSecret(prompt, existingVal) {
   const display = existingVal ? maskSecret(existingVal) : '';
   const def = display ? ` [${display}]` : '';
-  const answer = await ask(`${prompt}${def}: `);
+  const answer = await ask(`${prompt}${def} (q to quit): `);
+  checkQuit(answer);
   return answer || existingVal || '';
 }
 
 /** Returns first available package manager: pnpm, npm, or yarn. */
 function getPackageManager() {
   for (const cmd of ['pnpm', 'npm', 'yarn']) {
-    const r = spawnSync(cmd, ['--version'], { encoding: 'utf8', shell: true });
+    const r = spawnSync(cmd, ['--version'], { encoding: 'utf8' });
     if (r.status === 0 && r.stdout && String(r.stdout).trim().length > 0) return cmd;
   }
   return 'npm';
@@ -64,7 +73,7 @@ function ensureInstall() {
   if (!existsSync(nodeModules) || !existsSync(join(nodeModules, '@whiskeysockets', 'baileys'))) {
     const pm = getPackageManager();
     console.log(`Installing dependencies (${pm} install)…`);
-    const res = spawnSync(pm, ['install'], { cwd: ROOT, stdio: 'inherit', shell: true });
+    const res = spawnSync(pm, ['install'], { cwd: ROOT, stdio: 'inherit' });
     if (res.status !== 0) {
       console.error(`${pm} install failed.`);
       process.exit(res.status ?? 1);
