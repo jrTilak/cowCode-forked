@@ -23,6 +23,10 @@ import { rmSync, mkdirSync, existsSync } from 'fs';
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
 import { getEnabledTools, executeSkill } from './skills/registry.js';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const qrcodeTerminal = require('qrcode-terminal');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = join(__dirname, 'auth_info');
@@ -66,7 +70,6 @@ async function runAuthOnly(opts = {}) {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
     },
-    printQRInTerminal: true,
     logger,
   });
 
@@ -103,7 +106,8 @@ async function runAuthOnly(opts = {}) {
         }
       }
       if (u.qr) {
-        console.log('QR above ↑ — Scan with WhatsApp (Linked devices).');
+        qrcodeTerminal.generate(u.qr, { small: true });
+        console.log('Scan with WhatsApp (Linked devices).');
       }
     });
 
@@ -170,7 +174,6 @@ async function main() {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
       },
-      printQRInTerminal: false,
       logger,
     });
     sock.ev.on('creds.update', saveCreds);
