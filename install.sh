@@ -5,24 +5,33 @@ TARBALL="https://github.com/bishwashere/cowCode/archive/refs/heads/${BRANCH}.tar
 EXTRACTED="cowCode-${BRANCH}"
 DIR="cowCode"
 
+echo ""
+echo "  Welcome to cowCode — WhatsApp bot with your own LLM"
+echo "  ------------------------------------------------"
+echo ""
+
 if [ -d "$DIR" ]; then
   echo "Directory $DIR already exists. Remove it or use another directory."
   exit 1
 fi
 
-echo "Downloading cowCode..."
+echo "  ► Downloading..."
 curl -fsSL "$TARBALL" | tar xz
 mv "$EXTRACTED" "$DIR"
 cd "$DIR"
+echo "  ✓ Done."
+echo ""
 
-echo "Running setup..."
+echo "  ► Setting up (dependencies + config)..."
 if [ -t 0 ]; then
   node setup.js
 elif [ -e /dev/tty ]; then
   node setup.js < /dev/tty
 else
-  echo "No terminal. Run: cd $DIR && node setup.js"
+  echo "  No terminal. Run: cd $DIR && node setup.js"
 fi
 
 echo ""
-echo "To start the bot later: cd $DIR && npm start"
+echo "  ------------------------------------------------"
+echo "  To start the bot later:  cd $DIR && npm start"
+echo ""

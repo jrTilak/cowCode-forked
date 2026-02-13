@@ -146,7 +146,14 @@ async function main() {
   const needAuth = !existsSync(AUTH_DIR) || !existsSync(credsPath);
 
   if (needAuth) {
-    console.log('No WhatsApp session found. Scan the QR code to link your device.\n');
+    console.log('');
+    console.log('  ─────────────────────────────────────────');
+    console.log('  Link your WhatsApp');
+    console.log('  ─────────────────────────────────────────');
+    console.log('');
+    console.log('  No session found. A QR code will appear below.');
+    console.log('  Open WhatsApp → Linked devices → Link a device, then scan the code.');
+    console.log('');
     while (true) {
       try {
         const result = await runAuthOnly({ continueToBot: true });
@@ -391,13 +398,18 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
     process.exit(0);
   }
 
-  console.log('Connecting to WhatsApp…');
+  console.log('');
+  console.log('  ─────────────────────────────────────────');
+  console.log('  Connecting to WhatsApp');
+  console.log('  ─────────────────────────────────────────');
+  console.log('');
   sock.ev.on('connection.update', (u) => {
     if (u.connection === 'open') {
-      console.log('[connection] connection successful');
+      console.log('  [connection] connection successful');
       const sid = sock.user?.id ?? selfJid;
       if (sid) selfJid = sid;
-      console.log('WhatsApp connected. Self JID:', sid ?? 'unknown');
+      console.log('  WhatsApp connected. Message your own number to start chatting.');
+      console.log('');
       if (sid) {
         startCron({ sock, selfJid: sid, storePath: join(__dirname, 'cron', 'jobs.json') });
       }

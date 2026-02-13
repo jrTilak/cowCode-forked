@@ -17,10 +17,23 @@ const CONFIG_PATH = join(ROOT, 'config.json');
 const ENV_PATH = join(ROOT, '.env');
 const ENV_EXAMPLE = join(ROOT, '.env.example');
 
-const C = { reset: '\x1b[0m', cyan: '\x1b[36m' };
+const C = { reset: '\x1b[0m', cyan: '\x1b[36m', dim: '\x1b[2m', green: '\x1b[32m', bold: '\x1b[1m' };
 /** Color the main question label so all prompts look consistent. */
 function q(label) {
   return C.cyan + label + C.reset;
+}
+function section(title) {
+  console.log('');
+  console.log(C.dim + '  ─────────────────────────────────────────' + C.reset);
+  console.log(C.dim + '  ' + title + C.reset);
+  console.log(C.dim + '  ─────────────────────────────────────────' + C.reset);
+  console.log('');
+}
+function welcome() {
+  console.log('');
+  console.log(C.green + '  Welcome to cowCode' + C.reset);
+  console.log(C.dim + '  WhatsApp bot powered by your own LLM (local or cloud)' + C.reset);
+  console.log('');
 }
 
 function ask(question) {
@@ -78,13 +91,16 @@ function ensureInstall() {
   const nodeModules = join(ROOT, 'node_modules');
   if (!existsSync(nodeModules) || !existsSync(join(nodeModules, '@whiskeysockets', 'baileys'))) {
     const pm = getPackageManager();
-    console.log(`Installing dependencies (${pm} install)…`);
+    section('Installing dependencies');
+    console.log('  Running: ' + pm + ' install');
+    console.log('');
     const res = spawnSync(pm, ['install'], { cwd: ROOT, stdio: 'inherit' });
     if (res.status !== 0) {
-      console.error(`${pm} install failed.`);
+      console.error('  ' + pm + ' install failed.');
       process.exit(res.status ?? 1);
     }
-    console.log('Dependencies installed.\n');
+    console.log('');
+    console.log(C.dim + '  ✓ Dependencies ready.' + C.reset);
   }
 }
 
@@ -133,7 +149,7 @@ async function onboarding() {
   const envContent = hasEnv ? readFileSync(ENV_PATH, 'utf8') : '';
   const env = parseEnv(envContent);
 
-  console.log('\n--- One-time setup (optional: press Enter to keep defaults or skip) ---\n');
+  section('Configuration (optional — press Enter to keep defaults or skip)');
 
   const baseUrl = await promptWithDefault(q('Local LLM base URL (e.g. LM Studio)'), defaultBaseUrl || '');
 
@@ -190,7 +206,8 @@ async function onboarding() {
   newEnv.BRAVE_API_KEY = braveKey ?? '';
 
   writeFileSync(ENV_PATH, stringifyEnv(newEnv), 'utf8');
-  console.log('\nConfig and .env updated. Starting the app…\n');
+  console.log('');
+  console.log(C.dim + '  ✓ Config and .env saved.' + C.reset);
 }
 
 async function main() {
@@ -200,11 +217,14 @@ async function main() {
     console.log('Or: cd cowCode && npm install && npm start\n');
     process.exit(0);
   }
-  console.log('cowCode setup – install, configure, then run.\n');
+  welcome();
   ensureInstall();
   await onboarding();
 
-  console.log('Starting WhatsApp bot (scan QR if first time, then the bot runs).\n');
+  section('Starting cowCode');
+  console.log('  If this is your first time, you’ll see a QR code — scan it with WhatsApp.');
+  console.log('  Then send a message to your own number to start chatting.');
+  console.log('');
   const child = spawn('node', ['index.js'], {
     cwd: ROOT,
     stdio: 'inherit',
