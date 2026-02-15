@@ -22,15 +22,7 @@ cd "$DIR"
 echo "  ✓ Done."
 echo ""
 
-echo "  ► Setting up (dependencies + config)..."
-if [ -t 0 ]; then
-  node setup.js
-elif [ -e /dev/tty ]; then
-  node setup.js < /dev/tty
-else
-  echo "  No terminal. Run: cd $DIR && node setup.js"
-fi
-
+# Install launcher and PATH first so cowcode works even if setup.js fails
 INSTALL_DIR="$(pwd)"
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
@@ -41,8 +33,6 @@ EOF
 chmod +x "$BIN_DIR/cowcode"
 echo "  ► Launcher installed: $BIN_DIR/cowcode"
 
-# Add ~/.local/bin to PATH in shell config so cowcode works in new terminals
-# (We add to both .zshrc and .bashrc because install runs in bash — $SHELL can lie.)
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 add_path_to() {
   local f="$1"
@@ -58,6 +48,16 @@ if ! command -v cowcode >/dev/null 2>&1; then
   add_path_to "$HOME/.bashrc"
   add_path_to "$HOME/.profile"
   echo "  ► Open a new terminal, or run:  source ~/.zshrc   (then run: cowcode)"
+fi
+echo ""
+
+echo "  ► Setting up (dependencies + config)..."
+if [ -t 0 ]; then
+  node setup.js
+elif [ -e /dev/tty ]; then
+  node setup.js < /dev/tty
+else
+  echo "  No terminal. Run: cd $DIR && node setup.js"
 fi
 echo ""
 echo "  ------------------------------------------------"
