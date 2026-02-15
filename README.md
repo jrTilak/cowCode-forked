@@ -25,9 +25,9 @@ The bot runs in the background. **You can close the terminal** — it keeps runn
 
 If `cowcode` is not found, add `export PATH="$HOME/.local/bin:$PATH"` to your shell config (e.g. `~/.bashrc` or `~/.zshrc`).
 
-**Config and state** (config, WhatsApp auth, cron jobs) live in **`~/.cowcode`**. Override with `COWCODE_STATE_DIR`.
+**Code** is installed to **`~/.local/share/cowcode`** (fixed path, like OpenClaw). **Config and state** (config, WhatsApp auth, cron jobs) live in **`~/.cowcode`**. Override install path with `COWCODE_INSTALL_DIR` when running the install script.
 
-Other commands: `cowcode moo stop` | `cowcode moo status` | `cowcode moo restart`. To run in the foreground instead (terminal must stay open): `cowcode`.
+Other commands: `cowcode moo stop` | `cowcode moo status` | `cowcode moo restart`.
 
 That's it.
 
@@ -35,10 +35,10 @@ That's it.
 
 # 🔄 Update (get the latest code)
 
-From inside your cowCode folder (keeps your config, WhatsApp link, and reminders):
+From the install directory (keeps your config in `~/.cowcode`):
 
 ```bash
-cd cowCode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/update.sh | bash
+cd ~/.local/share/cowcode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/update.sh | bash
 ```
 
 Then start as usual: `cowcode moo start`
@@ -162,7 +162,7 @@ cowcode moo restart
 
 First time: link WhatsApp once with `cowcode auth` (or during setup when the QR appears). Then `cowcode moo start` runs the bot in the background.
 
-If you get "install directory not found": the `cowcode` launcher looks for your project in the folder where you ran install. If your project is elsewhere (e.g. `~/001apps/cowCode`), run `cowcode moo start` from inside that folder, or set `export COWCODE_INSTALL_DIR=~/001apps/cowCode` (then run `cowcode moo start`).
+Code is in `~/.local/share/cowcode`; you can run `cowcode moo start` from anywhere.
 
 ---
 

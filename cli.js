@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * CLI entry: run bot, auth, or moo start/stop/status/restart.
- * Usage: cowcode [start] | cowcode auth | cowcode moo start|stop|status|restart
+ * CLI entry: auth or moo start/stop/status/restart.
+ * Usage: cowcode auth | cowcode moo start|stop|status|restart
  */
 
 import { spawn } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INSTALL_DIR = __dirname;
@@ -21,6 +22,17 @@ if (sub === 'moo') {
     process.exit(action ? 1 : 0);
   }
   const script = join(INSTALL_DIR, 'scripts', 'daemon.sh');
+  if (!existsSync(script)) {
+    console.error('cowCode: scripts/daemon.sh not found at', INSTALL_DIR);
+    console.error('  The "cowcode" launcher is using the wrong folder.');
+    console.error('  Fix: run from inside your cowCode project folder:');
+    console.error('    cd /path/to/your/cowCode');
+    console.error('    cowcode moo start');
+    console.error('  Or set the folder and run:');
+    console.error('    export COWCODE_INSTALL_DIR=/path/to/your/cowCode');
+    console.error('    cowcode moo start');
+    process.exit(1);
+  }
   const child = spawn('bash', [script, action], {
     stdio: 'inherit',
     env: { ...process.env, COWCODE_INSTALL_DIR: INSTALL_DIR },
@@ -36,11 +48,7 @@ if (sub === 'moo') {
   });
   child.on('close', (code) => process.exit(code ?? 0));
 } else {
-  // default: run bot (with any extra args, e.g. --test)
-  const child = spawn(process.execPath, [join(INSTALL_DIR, 'index.js'), ...args], {
-    stdio: 'inherit',
-    env: process.env,
-    cwd: INSTALL_DIR,
-  });
-  child.on('close', (code) => process.exit(code ?? 0));
+  console.log('Usage: cowcode moo start | stop | status | restart');
+  console.log('       cowcode auth [options]');
+  process.exit(sub ? 1 : 0);
 }

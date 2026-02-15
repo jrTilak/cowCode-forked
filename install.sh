@@ -1,56 +1,44 @@
 #!/usr/bin/env bash
 # Install flow: download → launcher + PATH → setup (deps, config, WhatsApp link, bot runs).
 # New shell is created only after setup.js exits (user presses Ctrl+C to stop the bot).
-# In the new shell nothing runs automatically — user runs 'cowcode' when they want the bot.
+# Code lives in ~/.local/share/cowcode (fixed path); state in ~/.cowcode. Same idea as OpenClaw.
 set -e
-# Optional: run a command in the new shell after install (e.g. -c "cowcode" or -c "which cowcode")
-# Usage: curl ... | bash -s -- -c "cowcode"
 POST_INSTALL_CMD=
 [ "$1" = "-c" ] && [ -n "${2:-}" ] && POST_INSTALL_CMD="$2"
 
 BRANCH="${COWCODE_BRANCH:-master}"
 TARBALL="https://github.com/bishwashere/cowCode/archive/refs/heads/${BRANCH}.tar.gz"
 EXTRACTED="cowCode-${BRANCH}"
-DIR="cowCode"
+# Fixed install path — no path dependency (like OpenClaw global install)
+INSTALL_DIR="${COWCODE_INSTALL_DIR:-$HOME/.local/share/cowcode}"
+BIN_DIR="$HOME/.local/bin"
 
 echo ""
 echo "  Welcome to cowCode — WhatsApp bot with your own LLM"
 echo "  ------------------------------------------------"
 echo ""
 
-if [ -d "$DIR" ]; then
-  echo "Directory $DIR already exists. Remove it or use another directory."
-  exit 1
-fi
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
 
 echo "  ► Downloading..."
-curl -fsSL "$TARBALL" | tar xz
-mv "$EXTRACTED" "$DIR"
-cd "$DIR"
+curl -fsSL "$TARBALL" -o "$WORK/archive.tar.gz"
+tar xzf "$WORK/archive.tar.gz" -C "$WORK"
 echo "  ✓ Done."
 echo ""
 
-# Install launcher and PATH first so cowcode works even if setup.js fails
-INSTALL_DIR="$(pwd)"
-BIN_DIR="$HOME/.local/bin"
+echo "  ► Installing to $INSTALL_DIR ..."
+mkdir -p "$INSTALL_DIR"
+rsync -a --exclude=node_modules "$WORK/$EXTRACTED/" "$INSTALL_DIR/" 2>/dev/null || cp -R "$WORK/$EXTRACTED/"* "$INSTALL_DIR/"
+cd "$INSTALL_DIR"
+echo "  ✓ Code installed."
+echo ""
+
+# Launcher: fixed path only (like OpenClaw — run cowcode from anywhere)
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/cowcode" << LAUNCHER
 #!/usr/bin/env bash
-# Use COWCODE_INSTALL_DIR if set; else use current dir if it has cli.js; else use path from install
-COWCODE_DIR="\${COWCODE_INSTALL_DIR}"
-if [ -z "\$COWCODE_DIR" ] && [ -f "\$(pwd)/cli.js" ]; then
-  COWCODE_DIR="\$(pwd)"
-fi
-if [ -z "\$COWCODE_DIR" ]; then
-  COWCODE_DIR="$INSTALL_DIR"
-fi
-if [ ! -f "\$COWCODE_DIR/cli.js" ]; then
-  echo "cowCode: install directory not found (no cli.js)."
-  echo "  Set COWCODE_INSTALL_DIR to your cowCode folder, or run install from that folder."
-  echo "  Example: export COWCODE_INSTALL_DIR=\$HOME/001apps/cowCode"
-  exit 1
-fi
-cd "\$COWCODE_DIR" && exec node cli.js "\$@"
+exec node "$INSTALL_DIR/cli.js" "\$@"
 LAUNCHER
 chmod +x "$BIN_DIR/cowcode"
 echo "  ► Launcher installed: $BIN_DIR/cowcode"
@@ -72,7 +60,7 @@ if ! command -v cowcode >/dev/null 2>&1; then
   add_path_to "${ZDOTDIR:-$HOME}/.zprofile"
   add_path_to "$HOME/.bashrc"
   add_path_to "$HOME/.profile"
-  [ "$ADDED_PATH" = 1 ] && echo "  ► Open a new terminal, or run:  source ~/.zshrc   (then run: cowcode)"
+  [ "$ADDED_PATH" = 1 ] && echo "  ► Open a new terminal, or run:  source ~/.zshrc   (then run: cowcode moo start)"
 fi
 echo ""
 
@@ -91,7 +79,7 @@ else
   elif [ -e /dev/tty ]; then
     node setup.js < /dev/tty || true
   else
-    echo "  No terminal. Run: cd $DIR && node setup.js"
+    echo "  No terminal. Run: cd $INSTALL_DIR && node setup.js"
   fi
   trap - INT
   echo ""

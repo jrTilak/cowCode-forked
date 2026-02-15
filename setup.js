@@ -196,16 +196,16 @@ async function onboarding() {
     provider = await select({
       message: q('Cloud LLM provider?'),
       choices: [
+        { name: 'Skip', value: 'skip' },
         { name: 'OpenAI', value: 'openai' },
         { name: 'Grok', value: 'grok' },
         { name: 'Anthropic', value: 'anthropic' },
-        { name: 'Skip', value: 'skip' },
         { name: 'Quit', value: 'quit' },
       ],
     });
   } catch (err) {
     if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
-      const answer = await ask(q('Cloud LLM provider?') + ' (openai / grok / anthropic / skip, q to quit): ');
+      const answer = await ask(q('Cloud LLM provider?') + ' (skip / openai / grok / anthropic, q to quit): ');
       checkQuit(answer);
       provider = (answer || '').trim().toLowerCase() || 'skip';
     } else {
