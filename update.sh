@@ -21,17 +21,25 @@ fi
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# Compare with latest: skip update if already on same version
-LOCAL_VER=$(node -p "require('$ROOT/package.json').version" 2>/dev/null || true)
-REMOTE_JSON="$WORK/remote_package.json"
-# Avoid cached package.json (raw.githubusercontent.com can serve stale)
-if [ -n "$LOCAL_VER" ] && curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/bishwashere/cowCode/${BRANCH}/package.json?t=$(date +%s)" -o "$REMOTE_JSON" 2>/dev/null; then
-  REMOTE_VER=$(node -p "require('$REMOTE_JSON').version" 2>/dev/null || true)
-  if [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" = "$REMOTE_VER" ]; then
-    echo ""
-    echo "  Already up to date (v$LOCAL_VER)."
-    echo ""
-    exit 0
+# Skip version check when --force or -f is passed
+FORCE_UPDATE=
+for arg in "$@"; do
+  [ "$arg" = "--force" ] || [ "$arg" = "-f" ] && FORCE_UPDATE=1 && break
+done
+
+# Compare with latest: skip update if already on same version (unless --force)
+if [ -z "$FORCE_UPDATE" ]; then
+  LOCAL_VER=$(node -p "require('$ROOT/package.json').version" 2>/dev/null || true)
+  REMOTE_JSON="$WORK/remote_package.json"
+  # Avoid cached package.json (raw.githubusercontent.com can serve stale)
+  if [ -n "$LOCAL_VER" ] && curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/bishwashere/cowCode/${BRANCH}/package.json?t=$(date +%s)" -o "$REMOTE_JSON" 2>/dev/null; then
+    REMOTE_VER=$(node -p "require('$REMOTE_JSON').version" 2>/dev/null || true)
+    if [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" = "$REMOTE_VER" ]; then
+      echo ""
+      echo "  Already up to date (v$LOCAL_VER)."
+      echo ""
+      exit 0
+    fi
   fi
 fi
 
