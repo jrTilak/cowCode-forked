@@ -43,8 +43,19 @@ if [ -z "$FORCE_UPDATE" ]; then
   fi
 fi
 
+# Show before/after so user sees the update applied
+BEFORE_VER=$(node -p "require('$ROOT/package.json').version" 2>/dev/null || true)
+REMOTE_JSON="${REMOTE_JSON:-$WORK/remote_package.json}"
+[ ! -f "$REMOTE_JSON" ] && curl -fsSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/bishwashere/cowCode/${BRANCH}/package.json?t=$(date +%s)" -o "$REMOTE_JSON" 2>/dev/null || true
+AFTER_VER=$(node -p "require('$REMOTE_JSON').version" 2>/dev/null || true)
+
 echo ""
 echo "  cowCode — Updating..."
+if [ -n "$BEFORE_VER" ] && [ -n "$AFTER_VER" ]; then
+  echo "  From v$BEFORE_VER → v$AFTER_VER"
+elif [ -n "$AFTER_VER" ]; then
+  echo "  To v$AFTER_VER"
+fi
 echo "  ------------------------------------------------"
 echo ""
 
@@ -82,6 +93,13 @@ echo "  ► Installing dependencies..."
 rm -rf "$ROOT/node_modules"
 (cd "$ROOT" && (pnpm install --silent 2>/dev/null || npm install --silent 2>/dev/null || true))
 
+# Show after-version so user sees the update applied
+NOW_VER=$(node -p "require('$ROOT/package.json').version" 2>/dev/null || true)
 echo ""
-echo "  ✓ Update complete. Start the bot with:  cowcode moo start"
+if [ -n "$NOW_VER" ]; then
+  echo "  ✓ Update complete. Now at v$NOW_VER"
+else
+  echo "  ✓ Update complete."
+fi
+echo "  Start the bot with:  cowcode moo start"
 echo ""
