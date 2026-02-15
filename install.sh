@@ -41,21 +41,23 @@ EOF
 chmod +x "$BIN_DIR/cowcode"
 echo "  ► Launcher installed: $BIN_DIR/cowcode"
 
-# Add ~/.local/bin to PATH in shell config so cowcode works immediately
+# Add ~/.local/bin to PATH in shell config so cowcode works in new terminals
+# (We add to both .zshrc and .bashrc because install runs in bash — $SHELL can lie.)
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+add_path_to() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  grep -q '.local/bin' "$f" 2>/dev/null && return 0
+  echo "" >> "$f"
+  echo "# cowCode" >> "$f"
+  echo "$PATH_LINE" >> "$f"
+  echo "  ► Added ~/.local/bin to PATH in $f"
+}
 if ! command -v cowcode >/dev/null 2>&1; then
-  case "$SHELL" in
-    *zsh*)  RCFILE="${ZDOTDIR:-$HOME}/.zshrc" ;;
-    *)      RCFILE="$HOME/.bashrc" ;;
-  esac
-  [ -f "$RCFILE" ] || RCFILE="$HOME/.profile"
-  if ! grep -q '.local/bin' "$RCFILE" 2>/dev/null; then
-    echo "" >> "$RCFILE"
-    echo "# cowCode" >> "$RCFILE"
-    echo "$PATH_LINE" >> "$RCFILE"
-    echo "  ► Added ~/.local/bin to PATH in $RCFILE"
-  fi
-  echo "  ► Open a new terminal, or run:  source $RCFILE"
+  add_path_to "${ZDOTDIR:-$HOME}/.zshrc"
+  add_path_to "$HOME/.bashrc"
+  add_path_to "$HOME/.profile"
+  echo "  ► Open a new terminal, or run:  source ~/.zshrc   (then run: cowcode)"
 fi
 echo ""
 echo "  ------------------------------------------------"
