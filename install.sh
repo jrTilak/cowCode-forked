@@ -70,13 +70,16 @@ if [ -n "$POST_INSTALL_CMD" ]; then
 else
   echo "  (You will link WhatsApp in a moment. When you are done and want to stop the bot, press Ctrl+C.)"
   echo ""
+  # Ignore Ctrl+C in this script so we always reach the exec (new shell) after setup exits
+  trap '' INT
   if [ -t 0 ]; then
-    node setup.js
+    node setup.js || true
   elif [ -e /dev/tty ]; then
-    node setup.js < /dev/tty
+    node setup.js < /dev/tty || true
   else
     echo "  No terminal. Run: cd $DIR && node setup.js"
   fi
+  trap - INT
   echo ""
   echo "  ------------------------------------------------"
   echo "  To start the bot:  cowcode"
