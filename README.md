@@ -10,7 +10,7 @@ You chat in **"Message yourself"**, and the bot replies there.
 ### 1️⃣ Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh | bash
 ```
 
 ### 2️⃣ Start the bot (every time you want to use it)
@@ -32,7 +32,7 @@ That's it.
 From inside your cowCode folder (keeps your config, WhatsApp link, and reminders):
 
 ```bash
-cd cowCode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/main/update.sh | bash
+cd cowCode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/update.sh | bash
 ```
 
 Then start as usual: `npm start`

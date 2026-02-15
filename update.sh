@@ -4,7 +4,7 @@
 # Or:  cd cowCode && bash update.sh
 set -e
 
-BRANCH="${COWCODE_BRANCH:-main}"
+BRANCH="${COWCODE_BRANCH:-master}"
 TARBALL="https://github.com/bishwashere/cowCode/archive/refs/heads/${BRANCH}.tar.gz"
 EXTRACTED="cowCode-${BRANCH}"
 
