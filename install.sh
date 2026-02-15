@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
+# Install flow: download → launcher + PATH → setup (deps, config, WhatsApp link, bot runs).
+# New shell is created only after setup.js exits (user presses Ctrl+C to stop the bot).
+# In the new shell nothing runs automatically — user runs 'cowcode' when they want the bot.
 set -e
+# Optional: run a command in the new shell after install (e.g. -c "cowcode" or -c "which cowcode")
+# Usage: curl ... | bash -s -- -c "cowcode"
+POST_INSTALL_CMD=
+[ "$1" = "-c" ] && [ -n "${2:-}" ] && POST_INSTALL_CMD="$2"
+
 BRANCH="${COWCODE_BRANCH:-master}"
 TARBALL="https://github.com/bishwashere/cowCode/archive/refs/heads/${BRANCH}.tar.gz"
 EXTRACTED="cowCode-${BRANCH}"
@@ -47,6 +55,7 @@ add_path_to() {
 }
 if ! command -v cowcode >/dev/null 2>&1; then
   add_path_to "${ZDOTDIR:-$HOME}/.zshrc"
+  add_path_to "${ZDOTDIR:-$HOME}/.zprofile"
   add_path_to "$HOME/.bashrc"
   add_path_to "$HOME/.profile"
   [ "$ADDED_PATH" = 1 ] && echo "  ► Open a new terminal, or run:  source ~/.zshrc   (then run: cowcode)"
@@ -54,12 +63,32 @@ fi
 echo ""
 
 echo "  ► Setting up (dependencies + config)..."
-if [ -t 0 ]; then
-  node setup.js
-elif [ -e /dev/tty ]; then
-  node setup.js < /dev/tty
+if [ -n "$POST_INSTALL_CMD" ]; then
+  # Non-interactive: just install deps so cowcode can run when we exec with -c
+  (cd "$INSTALL_DIR" && (pnpm install --silent 2>/dev/null || npm install --silent 2>/dev/null || true))
+  echo "  ✓ Dependencies ready."
 else
-  echo "  No terminal. Run: cd $DIR && node setup.js"
+  echo "  (You will link WhatsApp in a moment. When you are done and want to stop the bot, press Ctrl+C.)"
+  echo ""
+  if [ -t 0 ]; then
+    node setup.js
+  elif [ -e /dev/tty ]; then
+    node setup.js < /dev/tty
+  else
+    echo "  No terminal. Run: cd $DIR && node setup.js"
+  fi
+  echo ""
+  echo "  ------------------------------------------------"
+  echo "  To start the bot:  cowcode"
+  echo "  (or from this folder:  npm start)"
+  echo ""
+  # New shell is created only after setup.js exits (e.g. after user presses Ctrl+C).
+  # Nothing runs automatically in the new shell — user runs 'cowcode' when they want the bot.
+  if [ "$ADDED_PATH" = 1 ] && [ -t 0 ]; then
+    echo "  ► Opening a new shell so  cowcode  works there. Run  cowcode  when you want to start the bot."
+    exec "${SHELL:-/bin/zsh}" -l
+  fi
+  exit 0
 fi
 echo ""
 echo "  ------------------------------------------------"
@@ -67,8 +96,11 @@ echo "  To start the bot:  cowcode"
 echo "  (or from this folder:  npm start)"
 echo ""
 
-# So the same terminal sees the new PATH: replace this process with a new login shell
-if [ "$ADDED_PATH" = 1 ] && [ -t 0 ]; then
+# When -c was passed: run that command in the new shell and exit
+if [ -n "$POST_INSTALL_CMD" ]; then
+  echo "  ► Running in new shell: $POST_INSTALL_CMD"
+  exec "${SHELL:-/bin/zsh}" -l -c "$POST_INSTALL_CMD"
+elif [ "$ADDED_PATH" = 1 ] && [ -t 0 ]; then
   echo "  ► Starting a new shell so  cowcode  works in this terminal..."
   exec "${SHELL:-/bin/zsh}" -l
 fi
