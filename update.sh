@@ -18,13 +18,26 @@ if [ ! -f "$ROOT/package.json" ] || [ ! -f "$ROOT/index.js" ]; then
   exit 1
 fi
 
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# Compare with latest: skip update if already on same version
+LOCAL_VER=$(node -p "require('$ROOT/package.json').version" 2>/dev/null || true)
+REMOTE_JSON="$WORK/remote_package.json"
+if [ -n "$LOCAL_VER" ] && curl -fsSL "https://raw.githubusercontent.com/bishwashere/cowCode/${BRANCH}/package.json" -o "$REMOTE_JSON" 2>/dev/null; then
+  REMOTE_VER=$(node -p "require('$REMOTE_JSON').version" 2>/dev/null || true)
+  if [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" = "$REMOTE_VER" ]; then
+    echo ""
+    echo "  Already up to date (v$LOCAL_VER)."
+    echo ""
+    exit 0
+  fi
+fi
+
 echo ""
 echo "  cowCode — Updating..."
 echo "  ------------------------------------------------"
 echo ""
-
-WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
 
 # State dir: config/auth/cron live here (new installs and after migration)
 STATE_DIR="${COWCODE_STATE_DIR:-$HOME/.cowcode}"
@@ -55,7 +68,9 @@ for f in "$SRC"/*; do
 done
 
 echo "  ► Installing dependencies..."
-(cd "$ROOT" && npm install)
+# Prefer pnpm (project uses it); avoid running npm over pnpm node_modules (causes "matches" error).
+rm -rf "$ROOT/node_modules"
+(cd "$ROOT" && (pnpm install --silent 2>/dev/null || npm install --silent 2>/dev/null || true))
 
 echo ""
 echo "  ✓ Update complete. Start the bot with:  cowcode moo start"
