@@ -263,7 +263,7 @@ export async function classifyIntent(userMessage) {
       role: 'system',
       content: `You classify the user's intent. Reply with exactly one word: CHAT, SCHEDULE_LIST, SCHEDULE_CREATE, or SEARCH.
 
-SEARCH = the user wants CURRENT, RECENT, or REAL-TIME information from the web. Examples: "what's the time now", "current time", "what is the weather today", "is it sunny or rainy", "recent AI trends", "latest news about X", "what's trending today", "search for X", "current price of Y". If they need up-to-date or live data (time, weather, etc.) = SEARCH.
+SEARCH = the user wants CURRENT, RECENT, or REAL-TIME information from the web. Any question about WEATHER (for any place, e.g. "how is enola weather", "weather in Tokyo", "what's the weather today") = SEARCH. Any question about current time, date, or live data = SEARCH. Other examples: "what's the time now", "current time", "is it sunny or rainy", "recent AI trends", "latest news about X", "what's trending today", "search for X", "current price of Y".
 
 SCHEDULE_LIST = the user ONLY wants to see, list, count, or ask about existing scheduled jobs/reminders/crons. Examples: "do we have any crons?", "which crons are set?", "list my reminders", "what's scheduled?".
 
@@ -288,11 +288,17 @@ CHAT = greetings, general knowledge questions (that don't need current data), or
       }
       const data = await res.json();
       const content = (data.choices?.[0]?.message?.content || '').trim().toUpperCase();
-      if (content.includes('SCHEDULE_LIST')) return 'SCHEDULE_LIST';
-      if (content.includes('SCHEDULE_CREATE')) return 'SCHEDULE_CREATE';
-      if (content.includes('SCHEDULE')) return 'SCHEDULE_CREATE';
-      if (content.includes('SEARCH')) return 'SEARCH';
-      return 'CHAT';
+      let intent = 'CHAT';
+      if (content.includes('SCHEDULE_LIST')) intent = 'SCHEDULE_LIST';
+      else if (content.includes('SCHEDULE_CREATE')) intent = 'SCHEDULE_CREATE';
+      else if (content.includes('SCHEDULE')) intent = 'SCHEDULE_CREATE';
+      else if (content.includes('SEARCH')) intent = 'SEARCH';
+      // Fallback: if user clearly asked about weather/time/news and model said CHAT, force SEARCH
+      const lower = (userMessage || '').trim().toLowerCase();
+      if (intent === 'CHAT' && (/\bweather\b/.test(lower) || /\b(current )?time\b/.test(lower) || /\b(latest|recent|today'?s?) (news|headlines)\b/.test(lower))) {
+        intent = 'SEARCH';
+      }
+      return intent;
     } catch (err) {
       console.log('[LLM] intent try failed:', label, err.message);
       lastError = err;

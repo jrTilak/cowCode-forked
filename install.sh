@@ -39,9 +39,23 @@ cat > "$BIN_DIR/cowcode" << EOF
 cd "$INSTALL_DIR" && exec node index.js "\$@"
 EOF
 chmod +x "$BIN_DIR/cowcode"
-echo "  ► Launcher installed: run  cowcode  from any terminal to start the bot."
+echo "  ► Launcher installed: $BIN_DIR/cowcode"
+
+# Add ~/.local/bin to PATH in shell config so cowcode works immediately
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 if ! command -v cowcode >/dev/null 2>&1; then
-  echo "  ► Add to your shell config if needed:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  case "$SHELL" in
+    *zsh*)  RCFILE="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    *)      RCFILE="$HOME/.bashrc" ;;
+  esac
+  [ -f "$RCFILE" ] || RCFILE="$HOME/.profile"
+  if ! grep -q '.local/bin' "$RCFILE" 2>/dev/null; then
+    echo "" >> "$RCFILE"
+    echo "# cowCode" >> "$RCFILE"
+    echo "$PATH_LINE" >> "$RCFILE"
+    echo "  ► Added ~/.local/bin to PATH in $RCFILE"
+  fi
+  echo "  ► Open a new terminal, or run:  source $RCFILE"
 fi
 echo ""
 echo "  ------------------------------------------------"
