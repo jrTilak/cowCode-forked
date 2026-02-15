@@ -23,14 +23,9 @@ if (sub === 'moo') {
   }
   const script = join(INSTALL_DIR, 'scripts', 'daemon.sh');
   if (!existsSync(script)) {
-    console.error('cowCode: scripts/daemon.sh not found at', INSTALL_DIR);
-    console.error('  The "cowcode" launcher is using the wrong folder.');
-    console.error('  Fix: run from inside your cowCode project folder:');
-    console.error('    cd /path/to/your/cowCode');
-    console.error('    cowcode moo start');
-    console.error('  Or set the folder and run:');
-    console.error('    export COWCODE_INSTALL_DIR=/path/to/your/cowCode');
-    console.error('    cowcode moo start');
+    console.error('cowCode: installation incomplete or corrupted.');
+    console.error('  Re-run the installer:');
+    console.error('  curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh | bash');
     process.exit(1);
   }
   const child = spawn('bash', [script, action], {
