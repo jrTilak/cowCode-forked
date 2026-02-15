@@ -31,7 +31,20 @@ else
   echo "  No terminal. Run: cd $DIR && node setup.js"
 fi
 
+INSTALL_DIR="$(pwd)"
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+cat > "$BIN_DIR/cowcode" << EOF
+#!/usr/bin/env bash
+cd "$INSTALL_DIR" && exec node index.js "\$@"
+EOF
+chmod +x "$BIN_DIR/cowcode"
+echo "  ► Launcher installed: run  cowcode  from any terminal to start the bot."
+if ! command -v cowcode >/dev/null 2>&1; then
+  echo "  ► Add to your shell config if needed:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
 echo ""
 echo "  ------------------------------------------------"
-echo "  To start the bot later:  cd $DIR && npm start"
+echo "  To start the bot:  cowcode"
+echo "  (or from this folder:  npm start)"
 echo ""

@@ -15,13 +15,14 @@ curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.
 
 ### 2️⃣ Start the bot (every time you want to use it)
 
+From **any terminal** (no need to cd into the folder):
+
 ```bash
-npm start
-# or
-pnpm start
-# or
-yarn start
+cowcode
 ```
+
+Or from the cowCode folder: `npm start` (or `pnpm start` / `yarn start`).  
+If `cowcode` isn’t found, add `export PATH="$HOME/.local/bin:$PATH"` to your shell config (e.g. `~/.bashrc` or `~/.zshrc`).
 
 That's it.
 
@@ -35,7 +36,7 @@ From inside your cowCode folder (keeps your config, WhatsApp link, and reminders
 cd cowCode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/update.sh | bash
 ```
 
-Then start as usual: `npm start`
+Then start as usual: `cowcode`
 
 ---
 
