@@ -56,6 +56,41 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+/** Test queries are in English; reply must be in English (not e.g. Spanish). Fails if reply appears to be in another language. */
+function assertReplyInSameLanguageAsQuery(query, reply) {
+  const spanishIndicators = [
+    'No tienes',
+    'recordatorios programados',
+    'ningún recordatorio',
+    'Puedes crear',
+    'si lo deseas',
+    'Usa "add"',
+    'para crear uno',
+    'eliminar un recordatorio',
+    'déjame saber',
+    'te daré los pasos',
+    'No hay recordatorios',
+    'He programado',
+    'Tu recordatorio',
+    'está programado',
+    'Te recordé',
+    '¿Cómo puedo',
+    'mañana a las',
+    'para "llamar',
+    'bebas agua',
+    'revisar el código',
+    'trabajos programados',
+    'un recordatorio diario',
+    'la opción de "add"',
+  ];
+  const lower = (reply || '').toLowerCase();
+  const found = spanishIndicators.filter((phrase) => lower.includes(phrase.toLowerCase()));
+  assert(
+    found.length === 0,
+    `Reply must be in same language as user (query is English). Reply appears to be in Spanish (found: ${found.join(', ')}). Reply (first 200 chars): ${(reply || '').slice(0, 200)}`
+  );
+}
+
 /**
  * Create a temp state dir with empty cron store. Copies config.json and .env from default state dir
  * so the child process has LLM config (otherwise we get ERR_INVALID_URL for baseUrl).
@@ -138,7 +173,73 @@ function loadStore(storePath) {
   }
 }
 
+/** Format jobs for table cell: one line per job (at/expr + message). */
+function formatCronSet(jobs) {
+  if (!Array.isArray(jobs) || jobs.length === 0) return '—';
+  return jobs
+    .map((j) => {
+      const msg = (j.message || '').slice(0, 60) + ((j.message || '').length > 60 ? '…' : '');
+      if (j.schedule?.kind === 'at' && j.schedule?.at) return `at ${j.schedule.at} → "${msg}"`;
+      if (j.schedule?.kind === 'cron' && j.schedule?.expr) return `cron ${j.schedule.expr} → "${msg}"`;
+      return `"${msg}"`;
+    })
+    .join('; ');
+}
+
+/** Escape pipe and newline for markdown table cell. */
+function cell(s) {
+  return String(s ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\|/g, '\\|')
+    .trim();
+}
+
+async function runReport() {
+  const rows = [];
+  const allQueries = [
+    ...CRON_LIST_QUERIES.map((q) => ({ query: q, type: 'list' })),
+    ...CRON_ADD_QUERIES.map((q) => ({ query: q, type: 'add' })),
+    { query: 'Remind me to check lock after two minutes', type: 'add-single' },
+    ...REMINDER_MANAGE_QUERIES.map((q) => ({ query: q, type: 'manage' })),
+  ];
+  console.log('Cron E2E report: running each query and capturing reply + store…\n');
+  for (const { query, type } of allQueries) {
+    try {
+      let reply = '';
+      let cronSet = '—';
+      if (type === 'add' || type === 'add-single') {
+        const { stateDir, storePath } = createTempStateDir();
+        reply = await runE2E(query, { stateDir });
+        const { jobs } = loadStore(storePath);
+        cronSet = formatCronSet(jobs);
+      } else {
+        reply = await runE2E(query);
+      }
+      rows.push({ query, reply, cronSet });
+      console.log('  ✓', query.slice(0, 50) + (query.length > 50 ? '…' : ''));
+    } catch (err) {
+      rows.push({ query, reply: `(error: ${err.message})`, cronSet: '—' });
+      console.log('  ✗', query.slice(0, 50), err.message);
+    }
+  }
+  const outPath = join(__dirname, 'CRON_E2E_TABLE.md');
+  const lines = [
+    '# Cron E2E: tabulated from test run',
+    '',
+    '| User said | Reply | Cron set |',
+    '|-----------|-------|----------|',
+    ...rows.map((r) => `| ${cell(r.query)} | ${cell(r.reply)} | ${cell(r.cronSet)} |`),
+  ];
+  writeFileSync(outPath, lines.join('\n'), 'utf8');
+  console.log('\nWrote', outPath);
+  process.exit(0);
+}
+
 async function main() {
+  if (process.argv.includes('--report')) {
+    await runReport();
+    return;
+  }
   let passed = 0;
   let failed = 0;
 
@@ -149,6 +250,7 @@ async function main() {
   for (const query of CRON_LIST_QUERIES) {
     try {
       const reply = await runE2E(query);
+      assertReplyInSameLanguageAsQuery(query, reply);
       const looksLikeList = reply.includes("don't have any") || reply.includes('scheduled') || reply.includes('reminder') || reply.includes('id=') || reply.includes('No ') || reply.includes('no ');
       assert(
         looksLikeList && reply.length > 10,
@@ -166,6 +268,7 @@ async function main() {
   for (const query of CRON_ADD_QUERIES) {
     try {
       const reply = await runE2E(query);
+      assertReplyInSameLanguageAsQuery(query, reply);
       const looksLikeConfirmation = /scheduled|set|added|reminder|in \d+ minute|at \d+:|will send|will remind/i.test(reply) || reply.length > 20;
       assert(
         looksLikeConfirmation,
@@ -184,6 +287,7 @@ async function main() {
   try {
     const { stateDir, storePath } = createTempStateDir();
     const reply = await runE2E(singleAddQuery, { stateDir });
+    assertReplyInSameLanguageAsQuery(singleAddQuery, reply);
     const looksLikeConfirmation = /scheduled|set|added|reminder|in \d+ minute|will send|will remind|timer|done/i.test(reply) || reply.length > 15;
     assert(looksLikeConfirmation, `Expected add confirmation. Got: ${reply.slice(0, 300)}`);
     const { jobs } = loadStore(storePath);
@@ -202,6 +306,7 @@ async function main() {
   for (const query of REMINDER_MANAGE_QUERIES) {
     try {
       const reply = await runE2E(query);
+      assertReplyInSameLanguageAsQuery(query, reply);
       const listStyle =
         reply.includes("don't have any") ||
         reply.includes('scheduled') ||

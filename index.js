@@ -214,9 +214,10 @@ async function main() {
     }
     return [];
   }
-  const chatSystemPrompt = 'You are a helpful assistant. Reply concisely in the same language the user uses. Do not use <think> or any thinking/reasoning blocks—output only your final reply.';
+  const LANGUAGE_RULE = 'Reply ONLY in the same language as the user. If the user writes in English, reply in English. Do not reply in Spanish, Hindi, or any other language unless the user used that language first.';
+  const chatSystemPrompt = `You are a helpful assistant. ${LANGUAGE_RULE} Reply concisely. Do not use <think> or any thinking/reasoning blocks—output only your final reply.`;
   function getBrowserSystemPrompt() {
-    return `You are a helpful assistant with access to the browser tool to search the web or open a URL. Reply concisely in the same language the user uses. Do not use <think> or any thinking/reasoning blocks—output only your final reply.
+    return `You are a helpful assistant with access to the browser tool to search the web or open a URL. ${LANGUAGE_RULE} Reply concisely. Do not use <think> or any thinking/reasoning blocks—output only your final reply.
 
 Use the browser tool to get current information: call action "search" with "query" set to the user's search (e.g. current time, weather, recent trends, latest news). Then answer based on the returned content. If the user gave a specific URL, use action "navigate" with "url".
 
@@ -230,7 +231,7 @@ CRITICAL - Give the exact data in your reply:
     const in1min = new Date(now + 60_000).toISOString();
     const in2min = new Date(now + 120_000).toISOString();
     const in3min = new Date(now + 180_000).toISOString();
-    return `You are a helpful assistant with access to the cron tool for reminders. Reply concisely in the same language the user uses. Do not use <think> or any thinking/reasoning blocks—output only your final reply.
+    return `You are a helpful assistant with access to the cron tool for reminders. ${LANGUAGE_RULE} Reply concisely. Do not use <think> or any thinking/reasoning blocks—output only your final reply.
 
 CRITICAL - Choose the right action:
 - If the user only asks to LIST, SEE, COUNT, or ask WHAT/WHICH crons exist (e.g. "how many crons?", "what is the next cron?", "which crons are set?", "list my reminders", "what's scheduled?") → call the cron tool exactly ONCE with action "list". Do NOT call "add" in the same message.
