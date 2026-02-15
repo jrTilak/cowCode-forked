@@ -1,5 +1,5 @@
 /**
- * E2E tests for news/headlines: go through the main chatting interface.
+ * E2E tests: news/headlines and browser search through the main chatting interface.
  * Sends user message → intent → LLM + browser tool → reply. Asserts on actual output.
  * Expect delay per test (AI + tool calls). Timeout per run: 2 minutes.
  */
@@ -9,7 +9,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+const ROOT = join(__dirname, '..', '..');
 
 const E2E_REPLY_MARKER_START = 'E2E_REPLY_START';
 const E2E_REPLY_MARKER_END = 'E2E_REPLY_END';
@@ -28,6 +28,16 @@ const NEWS_QUERIES = [
 const NON_NEWS_QUERIES = [
   "What's the weather in London?",
   "What is the capital of France?",
+];
+
+// Browser: specific search/navigate queries (SEARCH intent, browser tool).
+const BROWSER_SPECIFIC_QUERIES = [
+  "summarize the Wikipedia page on quantum computing",
+  "what's the current price of Bitcoin?",
+  "search for flights from Kathmandu to New York next week",
+  "find the latest iPhone 16 reviews on tech sites",
+  "go to nytimes.com and give me today's top stories",
+  "weather forecast for Camp Hill, Pennsylvania tomorrow",
 ];
 
 function assert(condition, message) {
@@ -85,7 +95,7 @@ async function main() {
   let passed = 0;
   let failed = 0;
 
-  console.log('E2E news tests: each run goes through main chat (intent → LLM → browser tool → reply).');
+  console.log('E2E tests: each run goes through main chat (intent → LLM → tool → reply).');
   console.log('Expect ~30s–2min per test depending on LLM. Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.\n');
   console.log('--- News (human questions) ---\n');
 
@@ -93,7 +103,7 @@ async function main() {
     try {
       const reply = await runE2E(query);
       // End-to-end: we expect the final reply to the user to contain headline-like content
-      // (either the raw RSS "Top news / headlines" or the LLM’s formatted list).
+      // (either the raw RSS "Top news / headlines" or the LLM's formatted list).
       const hasNumberedList = /\n\d+\.\s+.+/.test(reply) || /^\d+\.\s+.+/.test(reply) || /\b\d+\.\s+[^\s]/.test(reply);
       const hasTopNewsBlock = reply.includes('Top news') && reply.includes('1.');
       const hasHeadlinesWordAndList = reply.includes('headlines') && hasNumberedList;
@@ -117,6 +127,23 @@ async function main() {
       assert(
         !reply.includes('Top news / headlines\n\n1.') || reply.length < 400,
         `Non-news query "${query}" returned RSS-only reply`
+      );
+      console.log(`  ✓ "${query}"`);
+      passed++;
+    } catch (err) {
+      console.log(`  ✗ "${query}": ${err.message}`);
+      failed++;
+    }
+  }
+
+  console.log('\n--- Browser (specific queries) ---\n');
+  for (const query of BROWSER_SPECIFIC_QUERIES) {
+    try {
+      const reply = await runE2E(query);
+      // Browser tool should return substantive content (search/navigate result), not a short refusal.
+      assert(
+        reply.trim().length > 50,
+        `Expected substantive browser reply for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`
       );
       console.log(`  ✓ "${query}"`);
       passed++;

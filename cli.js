@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * CLI entry: auth or moo start/stop/status/restart.
- * Usage: cowcode auth | cowcode moo start|stop|status|restart
+ * CLI entry: auth, moo start/stop/status/restart, or update.
+ * Usage: cowcode auth | cowcode moo start|stop|status|restart | cowcode update
  */
 
 import { spawn } from 'child_process';
@@ -44,8 +44,22 @@ if (sub === 'moo') {
     cwd: INSTALL_DIR,
   });
   child.on('close', (code) => process.exit(code ?? 0));
+} else if (sub === 'update') {
+  const script = join(INSTALL_DIR, 'update.sh');
+  if (!existsSync(script)) {
+    console.error('cowCode: update.sh not found. Re-run the installer.');
+    console.error('  curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh | bash');
+    process.exit(1);
+  }
+  const child = spawn('bash', [script], {
+    stdio: 'inherit',
+    env: { ...process.env, COWCODE_ROOT: INSTALL_DIR },
+    cwd: INSTALL_DIR,
+  });
+  child.on('close', (code) => process.exit(code ?? 0));
 } else {
   console.log('Usage: cowcode moo start | stop | status | restart');
   console.log('       cowcode auth [options]');
+  console.log('       cowcode update');
   process.exit(sub ? 1 : 0);
 }

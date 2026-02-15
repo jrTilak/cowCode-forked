@@ -12,8 +12,8 @@ EXTRACTED="cowCode-${BRANCH}"
 ROOT="${COWCODE_ROOT:-$PWD}"
 if [ ! -f "$ROOT/package.json" ] || [ ! -f "$ROOT/index.js" ]; then
   echo ""
-  echo "  Run this from inside your cowCode folder:"
-  echo "    cd cowCode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/${BRANCH}/update.sh | bash"
+  echo "  Run from inside your cowCode folder, or use:  cowcode update"
+  echo "  Manual:  cd ~/.local/share/cowcode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/${BRANCH}/update.sh | bash"
   echo ""
   exit 1
 fi

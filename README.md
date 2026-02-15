@@ -35,13 +35,19 @@ That's it.
 
 # 🔄 Update (get the latest code)
 
-From the install directory (keeps your config in `~/.cowcode`):
+From anywhere (keeps your config in `~/.cowcode`):
+
+```bash
+cowcode update
+```
+
+Then start as usual: `cowcode moo start`
+
+If you installed to a custom path and don't use the `cowcode` launcher, run from the install directory:
 
 ```bash
 cd ~/.local/share/cowcode && curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/update.sh | bash
 ```
-
-Then start as usual: `cowcode moo start`
 
 ---
 
@@ -191,6 +197,7 @@ The bot will automatically search the web when needed.
 ```bash
 pnpm run test:browser
 pnpm run test:browser-e2e
+pnpm run test:cron-e2e
 pnpm run test:all
 ```
 

@@ -4,7 +4,7 @@
 set -e
 TEST_HOME="${TMPDIR:-/tmp}/cowcode-test-home.$$"
 TEST_DIR="${TMPDIR:-/tmp}/cowcode-test-dir.$$"
-INSTALL_SH="$(cd "$(dirname "$0")/.." && pwd)/install.sh"
+INSTALL_SH="$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
 rm -rf "$TEST_DIR" "$TEST_HOME"
 mkdir -p "$TEST_HOME" "$TEST_DIR"
 cd "$TEST_DIR"
