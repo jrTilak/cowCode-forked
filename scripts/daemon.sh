@@ -42,6 +42,13 @@ ensure_plist() {
   </array>
   <key>WorkingDirectory</key>
   <string>${STATE_DIR}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>COWCODE_STATE_DIR</key>
+    <string>${STATE_DIR}</string>
+    <key>COWCODE_INSTALL_DIR</key>
+    <string>${INSTALL_DIR}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -66,6 +73,7 @@ After=network.target
 
 [Service]
 Type=simple
+Environment="COWCODE_STATE_DIR=${STATE_DIR}" "COWCODE_INSTALL_DIR=${INSTALL_DIR}"
 ExecStart=${NODE} ${INDEX_JS}
 WorkingDirectory=${STATE_DIR}
 Restart=always

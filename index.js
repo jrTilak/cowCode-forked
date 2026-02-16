@@ -261,11 +261,14 @@ async function main() {
   const skillDocsBlock = skillDocs
     ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
     : '';
-  const timeCtx = getSchedulingTimeContext();
-  const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
-  const systemPrompt = useTools
-    ? chatSystemPrompt + timeBlock + skillDocsBlock
-    : chatSystemPrompt + `\n\n${timeCtx.timeContextLine}`;
+
+  function buildSystemPrompt() {
+    const timeCtx = getSchedulingTimeContext();
+    const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
+    return useTools
+      ? chatSystemPrompt + timeBlock + skillDocsBlock
+      : chatSystemPrompt + `\n\n${timeCtx.timeContextLine}`;
+  }
 
   async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef) {
     console.log('[agent] runAgentWithSkills started for:', text.slice(0, 60));
@@ -281,7 +284,7 @@ async function main() {
     };
     const historyMessages = getLast5Exchanges(jid);
     let messages = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: buildSystemPrompt() },
       ...historyMessages,
       { role: 'user', content: text },
     ];
