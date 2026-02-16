@@ -173,8 +173,7 @@ function stringifyEnv(obj) {
     .join('\n');
 }
 
-async function onboarding(opts = {}) {
-  const { whatsAppFirst = false } = opts;
+async function onboarding() {
   const config = loadConfig();
   const defaultBaseUrl = getDefaultBaseUrl(config);
   const envPath = getEnvPath();
@@ -227,14 +226,6 @@ async function onboarding(opts = {}) {
 
   const braveKey = await promptSecret(q('Brave Search API key – optional'), env.BRAVE_API_KEY || '');
 
-  let telegramToken = env.TELEGRAM_BOT_TOKEN || '';
-  if (whatsAppFirst) {
-    const addTg = await ask(q('Add Telegram too? (y/n)') + ' ');
-    if ((addTg || '').toLowerCase().startsWith('y')) {
-      telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), '');
-    }
-  }
-
   if (baseUrl && config?.llm?.models?.[0]) {
     config.llm.models[0].baseUrl = baseUrl;
     saveConfig(config);
@@ -245,15 +236,8 @@ async function onboarding(opts = {}) {
   newEnv.LLM_2_API_KEY = llm2Key ?? '';
   newEnv.LLM_3_API_KEY = llm3Key ?? '';
   newEnv.BRAVE_API_KEY = braveKey ?? '';
-  newEnv.TELEGRAM_BOT_TOKEN = telegramToken ?? '';
 
   writeFileSync(getEnvPath(), stringifyEnv(newEnv), 'utf8');
-
-  if (telegramToken && config) {
-    config.channels = config.channels || {};
-    config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
-    saveConfig(config);
-  }
 
   // When user adds a cloud LLM key during setup, set that model as priority — but only if no model
   // has priority yet (so we never overwrite a choice the user made later in config).
@@ -290,6 +274,8 @@ async function main() {
   welcome();
   migrateFromRoot();
   ensureInstall();
+
+  await onboarding();
 
   section('Messaging');
   let messagingFirst = 'whatsapp';
@@ -352,9 +338,21 @@ async function main() {
       if (!config.channels.telegram) config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
       saveConfig(config);
     }
+  } else {
+    const addTg = await ask(q('Add Telegram too? (y/n)') + ' ');
+    if ((addTg || '').toLowerCase().startsWith('y')) {
+      const telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), env.TELEGRAM_BOT_TOKEN || '');
+      if (telegramToken) {
+        env.TELEGRAM_BOT_TOKEN = telegramToken;
+        writeFileSync(envPath, stringifyEnv(env), 'utf8');
+        console.log(C.dim + '  ✓ Telegram token saved.' + C.reset);
+        const config = loadConfig() || {};
+        config.channels = config.channels || {};
+        config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
+        saveConfig(config);
+      }
+    }
   }
-
-  await onboarding({ whatsAppFirst: messagingFirst === 'whatsapp' });
 
   section('Starting cowCode');
   if (telegramOnly) {
