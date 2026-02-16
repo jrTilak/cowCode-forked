@@ -31,7 +31,7 @@ function section(title) {
 function welcome() {
   console.log('');
   console.log(C.green + '  Welcome to cowCode' + C.reset);
-  console.log(C.dim + '  WhatsApp bot powered by your own LLM (local or cloud)' + C.reset);
+  console.log(C.dim + '  WhatsApp + Telegram bot powered by your own LLM (local or cloud)' + C.reset);
   console.log('');
 }
 
@@ -173,7 +173,8 @@ function stringifyEnv(obj) {
     .join('\n');
 }
 
-async function onboarding() {
+async function onboarding(opts = {}) {
+  const { whatsAppFirst = false } = opts;
   const config = loadConfig();
   const defaultBaseUrl = getDefaultBaseUrl(config);
   const envPath = getEnvPath();
@@ -226,6 +227,14 @@ async function onboarding() {
 
   const braveKey = await promptSecret(q('Brave Search API key – optional'), env.BRAVE_API_KEY || '');
 
+  let telegramToken = env.TELEGRAM_BOT_TOKEN || '';
+  if (whatsAppFirst) {
+    const addTg = await ask(q('Add Telegram too? (y/n)') + ' ');
+    if ((addTg || '').toLowerCase().startsWith('y')) {
+      telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), '');
+    }
+  }
+
   if (baseUrl && config?.llm?.models?.[0]) {
     config.llm.models[0].baseUrl = baseUrl;
     saveConfig(config);
@@ -236,8 +245,15 @@ async function onboarding() {
   newEnv.LLM_2_API_KEY = llm2Key ?? '';
   newEnv.LLM_3_API_KEY = llm3Key ?? '';
   newEnv.BRAVE_API_KEY = braveKey ?? '';
+  newEnv.TELEGRAM_BOT_TOKEN = telegramToken ?? '';
 
   writeFileSync(getEnvPath(), stringifyEnv(newEnv), 'utf8');
+
+  if (telegramToken && config) {
+    config.channels = config.channels || {};
+    config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
+    saveConfig(config);
+  }
 
   // When user adds a cloud LLM key during setup, set that model as priority — but only if no model
   // has priority yet (so we never overwrite a choice the user made later in config).
@@ -274,17 +290,93 @@ async function main() {
   welcome();
   migrateFromRoot();
   ensureInstall();
-  await onboarding();
+
+  section('Messaging');
+  let messagingFirst = 'whatsapp';
+  let telegramOnly = false;
+  try {
+    const select = (await import('@inquirer/select')).default;
+    const choice = await select({
+      message: q('Which do you want to set up first?'),
+      choices: [
+        { name: 'WhatsApp (link your phone)', value: 'whatsapp' },
+        { name: 'Telegram (bot token from @BotFather)', value: 'telegram' },
+      ],
+    });
+    messagingFirst = choice;
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+      const answer = await ask(q('Which first?') + ' (1=WhatsApp 2=Telegram, q to quit): ');
+      checkQuit(answer);
+      messagingFirst = (answer || '1').trim() === '2' ? 'telegram' : 'whatsapp';
+    } else {
+      throw err;
+    }
+  }
+
+  const envPath = getEnvPath();
+  const hasEnv = existsSync(envPath);
+  const envContent = hasEnv ? readFileSync(envPath, 'utf8') : '';
+  let env = parseEnv(envContent);
+
+  if (messagingFirst === 'telegram') {
+    const telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), env.TELEGRAM_BOT_TOKEN || '');
+    if (telegramToken) {
+      env.TELEGRAM_BOT_TOKEN = telegramToken;
+      writeFileSync(envPath, stringifyEnv(env), 'utf8');
+      console.log(C.dim + '  ✓ Telegram token saved.' + C.reset);
+      const config = loadConfig() || {};
+      config.channels = config.channels || {};
+      config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
+      saveConfig(config);
+    }
+    const addWa = await ask(q('Add WhatsApp too? (y/n)') + ' ');
+    if ((addWa || '').toLowerCase().startsWith('y')) {
+      console.log('');
+      console.log('  Linking WhatsApp — a QR code or pairing prompt will appear.');
+      console.log('');
+      const authResult = spawnSync(process.execPath, [join(ROOT, 'index.js'), '--auth-only'], {
+        cwd: ROOT,
+        stdio: 'inherit',
+        shell: false,
+        env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' },
+      });
+      if (authResult.status !== 0) {
+        console.log(C.dim + '  WhatsApp linking failed or skipped. You can run: cowcode auth' + C.reset);
+      }
+    } else {
+      telegramOnly = true;
+      const config = loadConfig() || {};
+      config.channels = config.channels || {};
+      config.channels.whatsapp = { enabled: false };
+      if (!config.channels.telegram) config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
+      saveConfig(config);
+    }
+  }
+
+  await onboarding({ whatsAppFirst: messagingFirst === 'whatsapp' });
 
   section('Starting cowCode');
-  console.log('  If this is your first time, you’ll see a QR code — scan it with WhatsApp.');
-  console.log('  Then send a message to your own number to start chatting.');
+  if (telegramOnly) {
+    console.log('  Running in Telegram-only mode. Message your bot on Telegram to chat.');
+    console.log('  To add WhatsApp later: cowcode auth  then  cowcode moo start');
+  } else {
+    console.log('  If this is your first time with WhatsApp, you\'ll see a QR code — scan it.');
+    console.log('  Then send a message to your own number to start chatting.');
+    if (env.TELEGRAM_BOT_TOKEN) {
+      console.log('  Telegram is also enabled — you can message your bot there.');
+    }
+  }
   console.log('');
   const child = spawn('node', ['index.js'], {
     cwd: ROOT,
     stdio: 'inherit',
     shell: false,
-    env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' },
+    env: {
+      ...process.env,
+      NODE_ENV: process.env.NODE_ENV || 'development',
+      ...(telegramOnly ? { COWCODE_TELEGRAM_ONLY: '1' } : {}),
+    },
   });
   child.on('close', (code) => {
     console.log('');

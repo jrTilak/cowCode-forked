@@ -38,5 +38,14 @@
         "count": 8
       }
     }
+  },
+  "channels": {
+    "whatsapp": {
+      "enabled": true
+    },
+    "telegram": {
+      "enabled": false,
+      "botToken": "TELEGRAM_BOT_TOKEN"
+    }
   }
 }

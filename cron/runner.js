@@ -1,10 +1,11 @@
 /**
- * Cron runner. Schedules jobs from the store; when due, runs LLM and sends reply to WhatsApp.
+ * Cron runner. Schedules jobs from the store; when due, runs LLM and sends reply to WhatsApp or Telegram.
  */
 
 import { Cron } from 'croner';
 import { chat as llmChat } from '../llm.js';
 import { loadJobs, removeJob, updateJob } from './store.js';
+import { isTelegramChatId } from '../lib/telegram.js';
 
 function stripThinking(text) {
   if (!text || typeof text !== 'string') return '';
@@ -21,14 +22,29 @@ const scheduled = [];
 const oneShotTimeouts = [];
 /** Set by startCron so scheduleOneShot can use them */
 let currentSock = null;
+/** Optional Telegram bot for jobs whose jid is a Telegram chat id */
+let currentTelegramBot = null;
 let currentSelfJid = null;
 let currentStorePath = null;
+
+/**
+ * Send a text to jid (WhatsApp JID or Telegram chat id). Uses currentSock or currentTelegramBot.
+ */
+async function sendCronReply(jid, text) {
+  if (currentTelegramBot && isTelegramChatId(jid)) {
+    await currentTelegramBot.sendMessage(jid, text);
+  } else if (currentSock && typeof currentSock.sendMessage === 'function') {
+    await currentSock.sendMessage(jid, { text });
+  } else {
+    throw new Error('No transport to send cron reply');
+  }
+}
 
 /**
  * Run a single cron job: call LLM with job.message, send result to job.jid (or selfJid).
  * @param {Object} opts
  * @param {import('./store.js').CronJob} opts.job
- * @param {object} opts.sock - Baileys socket
+ * @param {object} opts.sock - Baileys socket (used when job.jid is WhatsApp)
  * @param {string} opts.selfJid - Fallback JID when job.jid is not set
  */
 async function runJob({ job, sock, selfJid }) {
@@ -45,13 +61,13 @@ async function runJob({ job, sock, selfJid }) {
     ]);
     const reply = stripThinking(rawReply);
     if (reply) {
-      await sock.sendMessage(jid, { text: '[CowCode] ' + reply });
+      await sendCronReply(jid, '[CowCode] ' + reply);
       console.log('[cron] Sent:', job.name);
     }
   } catch (err) {
     console.error('[cron] Job failed:', job.name, err.message);
     try {
-      await sock.sendMessage(jid, { text: `[CowCode] Moo — reminder "${job.name}" didn't go through: ${err.message}` });
+      await sendCronReply(jid, `[CowCode] Moo — reminder "${job.name}" didn't go through: ${err.message}`);
     } catch (_) {}
   }
 }
@@ -59,16 +75,23 @@ async function runJob({ job, sock, selfJid }) {
 /**
  * Start the cron runner: load jobs and schedule each enabled cron job and future one-shots.
  * Call this once WhatsApp is connected (so sock and selfJid are valid).
+ * Optional telegramBot: reminders created from Telegram (job.jid = chat id) are sent via Telegram.
  *
  * @param {Object} opts
- * @param {object} opts.sock - Baileys socket (sendMessage)
- * @param {string} opts.selfJid - Your WhatsApp JID (e.g. 1234567890@s.whatsapp.net) for "message yourself"
+ * @param {object} opts.sock - Baileys socket (sendMessage). Not overwritten when agent passes a Telegram sock.
+ * @param {string} opts.selfJid - Your WhatsApp JID for fallback when job.jid is missing
  * @param {string} [opts.storePath] - Path to cron/jobs.json
+ * @param {import('node-telegram-bot-api')} [opts.telegramBot] - Optional Telegram bot for Telegram chat ids
  */
-export function startCron({ sock, selfJid, storePath }) {
-  currentSock = sock;
-  currentSelfJid = selfJid;
-  currentStorePath = storePath || null;
+export function startCron({ sock, selfJid, storePath, telegramBot }) {
+  if (sock != null && sock.user?.id !== 'telegram') {
+    currentSock = sock;
+  }
+  if (telegramBot !== undefined) {
+    currentTelegramBot = telegramBot || null;
+  }
+  if (selfJid != null) currentSelfJid = selfJid;
+  if (storePath != null) currentStorePath = storePath;
 
   // Clear any previous schedules
   for (const c of scheduled) c.stop();

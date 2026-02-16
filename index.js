@@ -28,6 +28,8 @@ import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
 import { getSkillsEnabled, getSkillContext } from './skills/loader.js';
 import { executeSkill } from './skills/executor.js';
+import { initBot, createTelegramSock } from './lib/telegram.js';
+import { getChannelsConfig } from './lib/channels-config.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -164,11 +166,16 @@ async function main() {
   }
 
   let sock;
+  const channelsConfig = getChannelsConfig();
+  const envTelegramOnly = process.env.COWCODE_TELEGRAM_ONLY === '1' || process.env.COWCODE_TELEGRAM_ONLY === 'true';
+  const telegramOnlyMode = (envTelegramOnly || (channelsConfig.telegram.enabled && !channelsConfig.whatsapp.enabled)) && !!channelsConfig.telegram.botToken;
   const credsPath = join(getAuthDir(), 'creds.json');
   const needAuth = !existsSync(getAuthDir()) || !existsSync(credsPath);
 
-  // --test: use mock socket and skip WhatsApp auth so E2E tests can run without linking.
-  if (process.argv.includes('--test')) {
+  // Telegram-only: no WhatsApp socket; we'll start only the Telegram bot in runBot.
+  if (telegramOnlyMode) {
+    sock = null;
+  } else if (process.argv.includes('--test')) {
     sock = {
       sendMessage: async () => ({ key: { id: 'test-' + Date.now() } }),
       sendPresenceUpdate: async () => {},
@@ -454,12 +461,68 @@ async function main() {
     process.exit(0);
   }
 
-  console.log('');
-  console.log('  ─────────────────────────────────────────');
-  console.log('  Connecting to WhatsApp');
-  console.log('  ─────────────────────────────────────────');
-  console.log('');
-  sock.ev.on('connection.update', (u) => {
+  // Telegram-only mode: no WhatsApp; run only Telegram bot and cron.
+  if (telegramOnlyMode) {
+    const telegramToken = channelsConfig.telegram.botToken;
+    const telegramBot = initBot(telegramToken);
+    const telegramSock = createTelegramSock(telegramBot);
+    console.log('');
+    console.log('  ─────────────────────────────────────────');
+    console.log('  Running in Telegram-only mode');
+    console.log('  ─────────────────────────────────────────');
+    console.log('');
+    runBot(telegramSock, { telegramOnly: true, telegramBot });
+    return;
+  }
+
+  async function runBot(sock, opts = {}) {
+    const { telegramOnly, telegramBot: optsTelegramBot } = opts;
+    if (telegramOnly && optsTelegramBot) {
+      startCron({ storePath: getCronStorePath(), telegramBot: optsTelegramBot });
+      const lastSentByJid = new Map();
+      const ourSentMessageIds = new Set();
+      const telegramRepliedIds = new Set();
+      const MAX_TELEGRAM_REPLIED = 500;
+      optsTelegramBot.on('message', async (msg) => {
+        const chatId = msg.chat?.id;
+        const text = (msg.text || '').trim();
+        if (chatId == null || !text) return;
+        if (msg.from?.is_bot) return;
+        if (text.startsWith('[CowCode]')) return;
+        const msgKey = `tg:${chatId}:${msg.message_id}`;
+        if (telegramRepliedIds.has(msgKey)) return;
+        telegramRepliedIds.add(msgKey);
+        if (telegramRepliedIds.size > MAX_TELEGRAM_REPLIED) {
+          const first = telegramRepliedIds.values().next().value;
+          if (first) telegramRepliedIds.delete(first);
+        }
+        console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
+        const jidKey = String(chatId);
+        runAgentWithSkills(sock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }).catch((err) => {
+          console.error('Telegram agent error:', err.message);
+          optsTelegramBot.sendMessage(chatId, `[CowCode] Moo — something went wrong: ${err.message}`).catch(() => {});
+        });
+      });
+      return;
+    }
+
+    console.log('');
+    console.log('  ─────────────────────────────────────────');
+    console.log('  Connecting to WhatsApp');
+    console.log('  ─────────────────────────────────────────');
+    console.log('');
+
+    let telegramBot = null;
+    let telegramSock = null;
+    const telegramToken = getChannelsConfig().telegram.botToken;
+    if (telegramToken) {
+      telegramBot = initBot(telegramToken);
+      telegramSock = createTelegramSock(telegramBot);
+      console.log('  Telegram bot enabled.');
+      console.log('');
+    }
+
+    sock.ev.on('connection.update', (u) => {
     if (u.connection === 'open') {
       console.log('  [connection] connection successful');
       const sid = sock.user?.id ?? selfJid;
@@ -467,7 +530,7 @@ async function main() {
       console.log('  WhatsApp connected. Message your own number to start chatting.');
       console.log('');
       if (sid) {
-        startCron({ sock, selfJid: sid, storePath: getCronStorePath() });
+        startCron({ sock, selfJid: sid, storePath: getCronStorePath(), telegramBot: telegramBot || undefined });
       }
     }
     if (u.connection === 'close') {
@@ -548,6 +611,34 @@ async function main() {
       }
     }
   });
+
+  if (telegramSock && telegramBot) {
+    const telegramRepliedIds = new Set();
+    const MAX_TELEGRAM_REPLIED = 500;
+    telegramBot.on('message', async (msg) => {
+      const chatId = msg.chat?.id;
+      const text = (msg.text || '').trim();
+      if (chatId == null || !text) return;
+      if (msg.from?.is_bot) return;
+      if (text.startsWith('[CowCode]')) return;
+      const msgKey = `tg:${chatId}:${msg.message_id}`;
+      if (telegramRepliedIds.has(msgKey)) return;
+      telegramRepliedIds.add(msgKey);
+      if (telegramRepliedIds.size > MAX_TELEGRAM_REPLIED) {
+        const first = telegramRepliedIds.values().next().value;
+        if (first) telegramRepliedIds.delete(first);
+      }
+      console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
+      const jidKey = String(chatId);
+      runAgentWithSkills(telegramSock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }).catch((err) => {
+        console.error('Telegram agent error:', err.message);
+        telegramBot.sendMessage(chatId, `[CowCode] Moo — something went wrong: ${err.message}`).catch(() => {});
+      });
+    });
+  }
+  }
+
+  runBot(sock);
 }
 
 function stripThinking(text) {

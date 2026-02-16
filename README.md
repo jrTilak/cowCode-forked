@@ -53,10 +53,17 @@ cd ~/.local/share/cowcode && curl -fsSL https://raw.githubusercontent.com/bishwa
 
 # 💬 How to Use
 
-• Open WhatsApp
-• Go to **Message yourself** (or "Note to self")
-• Send a message
-• The bot replies in the same chat
+**Setup**  
+When you run `pnpm run setup` (or the install script), you choose which to set up **first**: **WhatsApp** or **Telegram**. You can add the other anytime (see below).
+
+**WhatsApp**  
+• Open WhatsApp → **Message yourself** (or "Note to self") → send a message. The bot replies there.
+
+**Telegram**  
+• If you set up Telegram (token in `~/.cowcode/.env`), message your bot on Telegram — same skills (reminders, search, etc.).
+
+**Both**  
+• You can use WhatsApp and Telegram at the same time. Reminders created on one are delivered on that channel.
 
 You can say things like:
 
@@ -65,6 +72,14 @@ You can say things like:
 * "summarize today's tasks"
 
 Cron reminders and web search are already enabled.
+
+---
+
+# 📱 Adding the other transport later
+
+• **Add Telegram:** Put `TELEGRAM_BOT_TOKEN=...` (from [@BotFather](https://t.me/BotFather)) in `~/.cowcode/.env`, then `cowcode moo start`. Both WhatsApp and Telegram will work.
+• **Add WhatsApp (or Telegram-only → WhatsApp):** Run `cowcode auth` to link your phone, then `cowcode moo start`.
+• **Telegram-only mode:** If you set up Telegram first and chose not to add WhatsApp, the app runs with `COWCODE_TELEGRAM_ONLY=1` when started from setup. To run Telegram-only later: `COWCODE_TELEGRAM_ONLY=1 cowcode moo start` (or add that env to your start command).
 
 ---
 
@@ -134,6 +149,25 @@ Configured in `~/.cowcode/config.json`.
 ```
 
 Remove a skill name to disable it.
+
+---
+
+# 📡 Channels (WhatsApp & Telegram)
+
+Configured in `~/.cowcode/config.json`, same file as `llm` and `skills`.
+
+```json
+"channels": {
+  "whatsapp": { "enabled": true },
+  "telegram": { "enabled": false, "botToken": "TELEGRAM_BOT_TOKEN" }
+}
+```
+
+• **whatsapp.enabled** — `true` (default) or `false`. If `false` and Telegram is enabled, the app runs in Telegram-only mode (no WhatsApp socket).
+• **telegram.enabled** — `true` to enable Telegram. Requires **telegram.botToken** (env var name or literal). Put the secret in `~/.cowcode/.env` (e.g. `TELEGRAM_BOT_TOKEN=...`).
+• **telegram.botToken** — Same pattern as LLM `apiKey`: use an env var name like `"TELEGRAM_BOT_TOKEN"` so the real token stays in `.env`.
+
+You can enable both; then WhatsApp (after linking with `cowcode auth`) and Telegram work at the same time.
 
 ---
 
