@@ -14,7 +14,7 @@ import { memorySkill } from './memory.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const DEFAULT_ENABLED = ['cron', 'browser'];
+const DEFAULT_ENABLED = ['cron', 'browser', 'memory'];
 
 /** Built-in skills. Add new skills here and to config.json skills.enabled when ready. */
 const BUILTIN_SKILLS = {
@@ -43,7 +43,7 @@ export function getSkillsConfig() {
     const enabled = Array.isArray(skills.enabled) ? skills.enabled : DEFAULT_ENABLED;
     return { enabled, ...skills };
   } catch {
-    return { enabled: ['cron'] };
+    return { enabled: DEFAULT_ENABLED };
   }
 }
 

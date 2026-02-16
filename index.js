@@ -3,7 +3,7 @@
  * Config and state live in ~/.cowcode (or COWCODE_STATE_DIR).
  */
 
-import { getAuthDir, getCronStorePath, getEnvPath, ensureStateDir, getWorkspaceDir } from './lib/paths.js';
+import { getAuthDir, getCronStorePath, getConfigPath, getEnvPath, ensureStateDir, getWorkspaceDir } from './lib/paths.js';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: getEnvPath() });
@@ -23,7 +23,7 @@ const {
 import { chat as llmChat, chatWithTools, classifyIntent, loadConfig } from './llm.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { rmSync, mkdirSync, existsSync } from 'fs';
+import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
 import { getEnabledTools, executeSkill, getSkillIdForToolName, getSkillsConfig } from './skills/registry.js';
@@ -123,8 +123,26 @@ async function runAuthOnly(opts = {}) {
   });
 }
 
+/** One-time migration: add "memory" to skills.enabled if missing so updates get the new default. */
+function migrateSkillsConfigToIncludeMemory() {
+  try {
+    const path = getConfigPath();
+    if (!existsSync(path)) return;
+    const raw = readFileSync(path, 'utf8');
+    const config = JSON.parse(raw);
+    const skills = config.skills;
+    if (!skills || typeof skills !== 'object') return;
+    const enabled = Array.isArray(skills.enabled) ? skills.enabled : [];
+    if (enabled.includes('memory')) return;
+    enabled.push('memory');
+    config.skills = { ...skills, enabled };
+    writeFileSync(path, JSON.stringify(config, null, 2), 'utf8');
+  } catch (_) {}
+}
+
 async function main() {
   ensureStateDir();
+  migrateSkillsConfigToIncludeMemory();
   if (authOnly && existsSync(getAuthDir())) {
     rmSync(getAuthDir(), { recursive: true });
     mkdirSync(getAuthDir(), { recursive: true });
