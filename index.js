@@ -26,7 +26,8 @@ import { fileURLToPath } from 'url';
 import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
-import { loadSkills, getEnabledTools, executeSkill, getSkillIdForToolName, getSkillsConfig } from './skills/registry.js';
+import { getSkillsEnabled, getSkillContext } from './skills/loader.js';
+import { executeSkill } from './skills/executor.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -142,7 +143,6 @@ function migrateSkillsConfigToIncludeMemory() {
 
 async function main() {
   ensureStateDir();
-  await loadSkills();
   migrateSkillsConfigToIncludeMemory();
   if (authOnly && existsSync(getAuthDir())) {
     rmSync(getAuthDir(), { recursive: true });
@@ -215,31 +215,46 @@ async function main() {
   console.log('LLM config:', config.models.length > 1
     ? `${config.models.length} models (priority): ${config.models.map(m => m.model).join(' → ')}`
     : { baseUrl: first.baseUrl, model: first.model });
-  const skillsConfig = getSkillsConfig();
-  console.log('Skills enabled:', skillsConfig.enabled?.length ? skillsConfig.enabled.join(', ') : 'cron (default)');
+  const skillsEnabled = getSkillsEnabled();
+  const { skillDocs, runSkillTool } = getSkillContext();
+  console.log('Skills enabled:', skillsEnabled?.length ? skillsEnabled.join(', ') : 'cron (default)');
 
   const MAX_REPLIED_IDS = 500;
   const MAX_OUR_SENT_IDS = 200;
+  const MAX_CHAT_HISTORY_EXCHANGES = 5;
 
-  // Agent logic (shared by real socket handler and --test mode)
-  const allTools = getEnabledTools();
-  const { enabled: skillsEnabled } = getSkillsConfig();
-  const memoryEnabled = Array.isArray(skillsEnabled) && skillsEnabled.includes('memory');
-  function getToolsForIntent(intent) {
-    if (intent === 'SCHEDULE_LIST' || intent === 'SCHEDULE_CREATE') {
-      return allTools.filter((t) => t.function?.name === 'cron');
+  /** Last N exchanges (user + assistant) per jid for LLM context. Step 1: chat + history + tools. */
+  const chatHistoryByJid = new Map();
+  function getLast5Exchanges(jid) {
+    const list = chatHistoryByJid.get(jid);
+    if (!list || list.length === 0) return [];
+    const out = [];
+    for (const ex of list) {
+      out.push({ role: 'user', content: ex.user });
+      out.push({ role: 'assistant', content: ex.assistant });
     }
-    if (intent === 'SEARCH') {
-      return allTools.filter((t) => t.function?.name === 'browser');
-    }
-    if (intent === 'CHAT' && memoryEnabled) {
-      return allTools.filter((t) => t.function?.name === 'memory_search' || t.function?.name === 'memory_get');
-    }
-    return [];
+    return out;
+  }
+  function pushExchange(jid, userContent, assistantContent) {
+    let list = chatHistoryByJid.get(jid);
+    if (!list) list = [];
+    list.push({ user: userContent, assistant: assistantContent });
+    if (list.length > MAX_CHAT_HISTORY_EXCHANGES) list = list.slice(-MAX_CHAT_HISTORY_EXCHANGES);
+    chatHistoryByJid.set(jid, list);
+  }
+
+  // Agent logic: LLM decides from skill docs; we only run what it returns (run_skill).
+  const allTools = runSkillTool;
+  const useSkills = Array.isArray(skillsEnabled) && skillsEnabled.length > 0 && allTools.length > 0;
+  function getToolsForIntent() {
+    return useSkills ? allTools : [];
   }
   const LANGUAGE_RULE = 'Reply ONLY in the same language as the user. If the user writes in English, reply in English. Do not reply in Spanish, Hindi, or any other language unless the user used that language first.';
+  const CLARIFICATION_RULE = 'When information is missing or unclear (e.g. time, message, which option), or when a tool returns an error, do NOT show the error to the user. Instead reply with a short, friendly question asking for the missing or unclear detail (e.g. "Did you mean tomorrow at 9 or next week?", "What message should I send you?"). Keep the conversation going until you have everything needed—no silent failures, no raw errors.';
   const chatSystemPrompt = `You are a helpful assistant. ${LANGUAGE_RULE} Reply concisely. Do not use <think> or any thinking/reasoning blocks—output only your final reply.`;
-  const memoryRecallLine = ' For questions about prior work, decisions, preferences, or todos, first use memory_search on MEMORY.md and memory/*.md, then memory_get to read only the needed lines.';
+  const skillDocsBlock = skillDocs
+    ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
+    : '';
   function getBrowserSystemPrompt() {
     return `You are a helpful assistant with access to the browser tool to search the web or open a URL. ${LANGUAGE_RULE} Reply concisely. Do not use <think> or any thinking/reasoning blocks—output only your final reply.
 
@@ -247,7 +262,9 @@ Use the browser tool to get current information: call action "search" with "quer
 
 CRITICAL - Give the exact data in your reply:
 - Time, weather, date: State the actual value from the results (e.g. "The time is 3:45 PM IST", "It's 28°C and sunny"). Do NOT say "check the link" or "search for it".
-- News/headlines: When the user asks for top/latest news or headlines, LIST the actual headlines from the tool result (e.g. "1. Headline one. 2. Headline two. ..."). Do NOT reply with only a disclaimer (e.g. "headlines may change")—always include the list of headlines.`;
+- News/headlines: When the user asks for top/latest news or headlines, LIST the actual headlines from the tool result (e.g. "1. Headline one. 2. Headline two. ..."). Do NOT reply with only a disclaimer (e.g. "headlines may change")—always include the list of headlines.
+
+${CLARIFICATION_RULE}`;
   }
   function getScheduleSystemPrompt() {
     const now = Date.now();
@@ -267,7 +284,9 @@ Use the cron tool to add, list, or remove reminders as requested. For multiple r
 
 Current time: ${nowIso}. Use future ISO 8601 for "at". Examples: "in 1 minute" = ${in1min}; "in 2 minutes" = ${in2min}; "in 3 minutes" = ${in3min}. For "every one minute for the next three minutes" you MUST call cron add THREE times: first at ${in1min}, second at ${in2min}, third at ${in3min}. Never use the same "at" for multiple jobs.
 
-Important: job.message must be exactly what the user asked to receive (e.g. "fun fact" / "Give me a fun fact"—do not substitute "Hello, how can I assist").`;
+Important: job.message must be exactly what the user asked to receive (e.g. "fun fact" / "Give me a fun fact"—do not substitute "Hello, how can I assist").
+
+${CLARIFICATION_RULE} If the user says "remind me" without when or what, ask e.g. "When should I remind you, and what message would you like?"`;
   }
   async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef) {
     console.log('[agent] runAgentWithSkills started for:', text.slice(0, 60));
@@ -281,11 +300,11 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
     } catch (err) {
       console.error('[agent] intent classification failed:', err.message);
     }
-    const toolsToUse = getToolsForIntent(intent);
+    const toolsToUse = getToolsForIntent();
     const useTools = toolsToUse.length > 0;
     const isListOnly = intent === 'SCHEDULE_LIST';
     const isSearch = intent === 'SEARCH';
-    const isMemoryOnly = useTools && toolsToUse.every((t) => t.function?.name === 'memory_search' || t.function?.name === 'memory_get');
+    const isMemoryOnly = useTools && intent === 'CHAT';
     if (useTools && !isListOnly && !isSearch && !isMemoryOnly) {
       const immediateReply = "[CowCode] Grazing on that…";
       const immediateSent = await sock.sendMessage(jid, { text: immediateReply });
@@ -299,9 +318,10 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
       lastSentByJidMap.set(jid, immediateReply);
       console.log('[replied] (immediate)');
     }
-    const systemPrompt = useTools
-      ? (intent === 'SEARCH' ? getBrowserSystemPrompt() : intent === 'CHAT' ? chatSystemPrompt + memoryRecallLine : getScheduleSystemPrompt())
+    const basePrompt = useTools
+      ? (intent === 'SEARCH' ? getBrowserSystemPrompt() : intent === 'CHAT' ? chatSystemPrompt : getScheduleSystemPrompt())
       : chatSystemPrompt;
+    const systemPrompt = useTools ? basePrompt + skillDocsBlock : basePrompt;
     const ctx = {
       storePath: getCronStorePath(),
       jid,
@@ -309,14 +329,17 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
       scheduleOneShot,
       startCron: () => startCron({ sock, selfJid: selfJidForCron, storePath: getCronStorePath() }),
     };
+    const historyMessages = getLast5Exchanges(jid);
     let messages = [
       { role: 'system', content: systemPrompt },
+      ...historyMessages,
       { role: 'user', content: text },
     ];
     let finalContent = '';
     let cronListResult = null;
     let browserResult = null;
-    const maxToolRounds = 1;
+    let lastRoundHadToolError = false;
+    const maxToolRounds = 3;
     for (let round = 0; round <= maxToolRounds; round++) {
       if (!useTools) {
         const rawReply = await llmChat(messages);
@@ -338,29 +361,33 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
         })),
       };
       messages = messages.concat(assistantMsg);
+      lastRoundHadToolError = false;
       for (const tc of toolCalls) {
-        let args = {};
+        let payload = {};
         try {
-          args = JSON.parse(tc.arguments || '{}');
+          payload = JSON.parse(tc.arguments || '{}');
         } catch {
-          args = {};
+          payload = {};
         }
-        const toolName = tc.name;
-        const skillId = getSkillIdForToolName(toolName);
-        const action = args?.action && String(args.action).trim().toLowerCase();
-        const isSpuriousAdd = useTools && isListOnly && skillId === 'cron' && action === 'add';
-        if (isSpuriousAdd) {
-          console.log('[agent] tool call:', toolName, '(add skipped: list-only query)');
+        const skillId = payload.skill && String(payload.skill).trim();
+        const runArgs = payload.arguments && typeof payload.arguments === 'object' ? payload.arguments : {};
+        const toolName = skillId === 'memory' ? (runArgs.tool || 'memory_search') : undefined;
+        const action = runArgs?.action && String(runArgs.action).trim().toLowerCase();
+        if (!skillId) {
+          const errContent = JSON.stringify({ error: 'run_skill requires "skill" and "arguments".' });
+          lastRoundHadToolError = true;
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: 'Skipped: user only asked to list existing crons; no job added.',
+            content: errContent,
           });
           continue;
         }
-        console.log('[agent] tool call:', toolName, tc.arguments?.slice(0, 80));
-        const result = await executeSkill(skillId, ctx, args, toolName);
-        if (skillId === 'cron' && action === 'list' && result && typeof result === 'string') {
+        console.log('[agent] run_skill', skillId, tc.arguments?.slice(0, 80));
+        const result = await executeSkill(skillId, ctx, runArgs, toolName);
+        const isToolError = typeof result === 'string' && result.trim().startsWith('{"error":');
+        if (isToolError) lastRoundHadToolError = true;
+        if (skillId === 'cron' && action === 'list' && result && typeof result === 'string' && !isToolError) {
           cronListResult = result;
         }
         if (skillId === 'browser' && result && typeof result === 'string') {
@@ -376,6 +403,16 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
         });
       }
     }
+    // If tools returned errors but the LLM never replied with text, ask the user for clarification (no raw errors).
+    if (useTools && !stripThinking(finalContent).trim() && lastRoundHadToolError) {
+      try {
+        const { content: clarification } = await chatWithTools(messages, []);
+        const text = clarification && stripThinking(clarification).trim();
+        if (text) finalContent = text;
+      } catch (err) {
+        console.error('[agent] clarification round failed:', err.message);
+      }
+    }
     // For SEARCH: if we have search results but no LLM reply (e.g. model didn't synthesize), run one more call with no tools so the model answers with the exact data from the results.
     if (isSearch && browserResult && !stripThinking(finalContent).trim()) {
       try {
@@ -388,7 +425,7 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
     }
     // For SEARCH: prefer browserResult when the LLM returned tool-call JSON or a disclaimer without listing headlines.
     const trimmedFinal = stripThinking(finalContent).trim();
-    const looksLikeToolCallJson = /"name"\s*:\s*"browser"|"action"\s*:\s*"search"|"parameters"\s*:\s*\{/.test(trimmedFinal);
+    const looksLikeToolCallJson = /"skill"\s*:|\"run_skill\"|"action"\s*:\s*"search"|"parameters"\s*:\s*\{/.test(trimmedFinal);
     const hasNumberedHeadlines = /\n\d+\.\s+.+/.test(trimmedFinal) || /^\d+\.\s+.+/.test(trimmedFinal);
     const browserHasNewsBlock = browserResult && browserResult.includes('Top news / headlines');
     const useBrowserResultForSearch = isSearch && browserResult && browserResult.trim() && (
@@ -436,6 +473,11 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
     } else {
       textToSend = "[CowCode] Done. Anything else?";
     }
+    // Never send raw error JSON to the user—keep the conversation going with a clarifying ask.
+    const body = textToSend.replace(/^\[CowCode\]\s*/i, '').trim();
+    if (body.startsWith('{"error":')) {
+      textToSend = "[CowCode] I need a bit more detail—when should I remind you, and what message would you like?";
+    }
     const sent = await sock.sendMessage(jid, { text: textToSend });
     if (sent?.key?.id && ourSentIdsRef?.current) {
       ourSentIdsRef.current.add(sent.key.id);
@@ -445,6 +487,7 @@ Important: job.message must be exactly what the user asked to receive (e.g. "fun
       }
     }
     lastSentByJidMap.set(jid, textToSend);
+    pushExchange(jid, text, textToSend);
     console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
   }
 

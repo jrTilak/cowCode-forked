@@ -2,10 +2,10 @@
 
 Semantic search and read over your notes in `MEMORY.md` and `memory/*.md` (e.g. `memory/2025-02-15.md`).
 
-## Tools
+## Tools (pass `tool` in arguments: "memory_search" or "memory_get")
 
-- **memory_search** — Semantically search for prior work, decisions, preferences, or todos. Returns snippets with path and line range. Use before answering questions about past context.
-- **memory_get** — Read a snippet by path (from memory_search) and optional line range. Use after memory_search to pull only needed lines.
+- **memory_search** — Set `tool: "memory_search"`, `query` (required). Optional: `maxResults`, `minScore`. Semantically search for prior work, decisions, preferences, or todos. Returns snippets with path and line range.
+- **memory_get** — Set `tool: "memory_get"`, `path` (required, from memory_search). Optional: `from`, `lines`. Read a snippet by path and optional line range.
 
 ## Config
 

@@ -1,0 +1,4 @@
+{
+  "id": "memory",
+  "description": "Semantic search and read over MEMORY.md and memory/*.md. Tools: memory_search, memory_get. Pass tool in arguments. See skill.md."
+}
