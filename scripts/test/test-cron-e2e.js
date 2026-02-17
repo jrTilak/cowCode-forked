@@ -6,16 +6,25 @@
  * - Reply text looks like list / add confirmation / remove.
  * - For a single "add" message, the cron store has exactly one job (catches duplicate-add bugs).
  * We do NOT wait for one-shot delivery (would require keeping process alive and capturing sent messages).
+ *
+ * Why the "execute" test didn't catch the runner stdout bug: the test uses its own runJobOnce()
+ * which parses the *last line* of run-job stdout. The production cron/runner.js used to parse
+ * the *entire* stdout as JSON, so when run-job's child logged to stdout (e.g. [agent] run_skill),
+ * the runner failed to parse and never sent the reply. The test passed because runJobOnce() had
+ * correct last-line parsing from the start. The test "Runner parses multi-line stdout" below
+ * guards the same contract so a regression in runner.js would be caught.
  */
 
 import { spawn } from 'child_process';
 import { readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
+/** Use system install (all-users) when COWCODE_INSTALL_DIR is set; otherwise run from repo. */
+const INSTALL_ROOT = process.env.COWCODE_INSTALL_DIR ? resolve(process.env.COWCODE_INSTALL_DIR) : ROOT;
 const DEFAULT_STATE_DIR = join(homedir(), '.cowcode');
 
 const E2E_REPLY_MARKER_START = 'E2E_REPLY_START';
@@ -102,10 +111,11 @@ function assertReplyInSameLanguageAsQuery(query, reply) {
 /**
  * Create a temp state dir with empty cron store. Copies config.json and .env from default state dir
  * so the child process has LLM config (otherwise we get ERR_INVALID_URL for baseUrl).
+ * Uses tmpdir so it works when INSTALL_ROOT is read-only (e.g. system install for all users).
  * @returns {{ stateDir: string, storePath: string }}
  */
 function createTempStateDir() {
-  const stateDir = join(ROOT, 'scripts', 'test', '.tmp-cron-e2e-' + Date.now());
+  const stateDir = join(tmpdir(), 'cowcode-cron-e2e-' + Date.now());
   const cronDir = join(stateDir, 'cron');
   const storePath = join(cronDir, 'jobs.json');
   mkdirSync(cronDir, { recursive: true });
@@ -129,8 +139,8 @@ function runE2E(userMessage, opts = {}) {
   const env = { ...process.env };
   if (opts.stateDir) env.COWCODE_STATE_DIR = opts.stateDir;
   return new Promise((resolve, reject) => {
-    const child = spawn('node', ['index.js', '--test', userMessage], {
-      cwd: ROOT,
+    const child = spawn('node', [join(INSTALL_ROOT, 'index.js'), '--test', userMessage], {
+      cwd: INSTALL_ROOT,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -201,8 +211,8 @@ function runJobOnce(message, opts = {}) {
     workspaceDir,
   });
   return new Promise((resolve, reject) => {
-    const child = spawn('node', [join(ROOT, 'cron', 'run-job.js')], {
-      cwd: ROOT,
+    const child = spawn('node', [join(INSTALL_ROOT, 'cron', 'run-job.js')], {
+      cwd: INSTALL_ROOT,
       env: { ...process.env, COWCODE_STATE_DIR: stateDir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -307,7 +317,9 @@ async function main() {
   let failed = 0;
 
   console.log('E2E cron tests: intent → LLM → cron tool → reply.');
-  console.log('Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.\n');
+  console.log('Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.');
+  if (INSTALL_ROOT !== ROOT) console.log('Using system install (COWCODE_INSTALL_DIR):', INSTALL_ROOT);
+  console.log('');
 
   console.log('--- Cron (list) ---\n');
   for (const query of CRON_LIST_QUERIES) {

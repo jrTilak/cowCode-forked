@@ -259,7 +259,7 @@ export async function chatWithTools(messages, tools) {
         name: tc.function?.name || '',
         arguments: typeof tc.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}),
       }));
-      console.log('[LLM] used:', label, toolCalls.length ? `(${toolCalls.length} tool call(s))` : '');
+      console.log('[LLM] used:', label, toolCalls.length ? '(with tools)' : '');
       return { content, toolCalls };
     } catch (err) {
       console.log('[LLM] try failed:', label, err.message);

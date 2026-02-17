@@ -91,12 +91,14 @@ async function runJobOnce({ job, sock, selfJid }) {
         reject(new Error(`run-job killed: ${signal}`));
         return;
       }
+      // run-job writes exactly one JSON line; child may also log to stdout (e.g. agent), so use last line
+      const lastLine = out.trim().split('\n').filter(Boolean).pop() || '';
       try {
-        const parsed = JSON.parse(out.trim());
+        const parsed = JSON.parse(lastLine);
         if (parsed.error) reject(new Error(parsed.error));
         else resolve(parsed.textToSend || '');
       } catch (e) {
-        reject(new Error(out.trim() || e.message || 'run-job produced invalid output'));
+        reject(new Error(lastLine.slice(0, 100) || e.message || 'run-job produced invalid output'));
       }
     });
     child.on('error', reject);

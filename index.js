@@ -109,6 +109,26 @@ function wrapForRedaction(pinoInstance) {
   };
 }
 
+// Patch console so deps (e.g. Baileys WAM/encode) never log key material to stdout
+const _consoleLog = console.log;
+const _consoleInfo = console.info;
+const _consoleDebug = console.debug;
+const _consoleWarn = console.warn;
+function redactConsoleArgs(args) {
+  return args.map((a) => {
+    if (a !== null && typeof a === 'object') return redactForLog(a);
+    if (typeof a === 'string' && a.length > 200) {
+      const t = a.trim();
+      if (t.startsWith('{') || t.startsWith('[')) return a.slice(0, 60) + '… [truncated]';
+    }
+    return a;
+  });
+}
+console.log = (...args) => _consoleLog(...redactConsoleArgs(args));
+console.info = (...args) => _consoleInfo(...redactConsoleArgs(args));
+console.debug = (...args) => _consoleDebug(...redactConsoleArgs(args));
+console.warn = (...args) => _consoleWarn(...redactConsoleArgs(args));
+
 const DISCONNECT_REASONS = {
   401: 'Logged out',
   403: 'Forbidden (e.g. banned)',
@@ -367,7 +387,7 @@ async function main() {
   }
 
   async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef) {
-    console.log('[agent] runAgentWithSkills started for:', text.slice(0, 60));
+    console.log('[agent] handling:', text.slice(0, 50) + (text.length > 50 ? '…' : ''));
     try {
       await sock.sendPresenceUpdate('composing', jid);
     } catch (_) {}
