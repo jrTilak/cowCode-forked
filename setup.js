@@ -17,6 +17,20 @@ const ROOT = __dirname;
 const ENV_EXAMPLE = join(ROOT, '.env.example');
 
 const C = { reset: '\x1b[0m', cyan: '\x1b[36m', dim: '\x1b[2m', green: '\x1b[32m', bold: '\x1b[1m' };
+
+/** Theme for @inquirer/select: same hint as default but add Ctrl+C quit. */
+function selectTheme() {
+  return {
+    style: {
+      keysHelpTip(keys) {
+        const withQuit = [...keys, ['Ctrl+C', 'quit']];
+        return withQuit
+          .map(([k, a]) => `${C.bold}${k}${C.reset} ${C.dim}${a}${C.reset}`)
+          .join(C.dim + ' • ' + C.reset);
+      },
+    },
+  };
+}
 /** Color the main question label so all prompts look consistent. */
 function q(label) {
   return C.cyan + label + C.reset;
@@ -65,7 +79,7 @@ async function selectModel(message, choices) {
   if (!Array.isArray(choices) || choices.length === 0) return '';
   try {
     const select = (await import('@inquirer/select')).default;
-    return await select({ message, choices });
+    return await select({ message, choices, theme: selectTheme() });
   } catch (err) {
     if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
       const line = choices.map((c, i) => `${i + 1}. ${c.name}`).join('\n  ');
@@ -103,17 +117,35 @@ async function promptSecret(prompt, existingVal) {
  */
 const CLOUD_LLM_MODELS = {
   openai: [
-    { name: 'GPT-4o (recommended)', value: 'gpt-4o' },
+    { name: 'GPT-5.2 (recommended)', value: 'gpt-5.2' },
+    { name: 'GPT-5 mini', value: 'gpt-5-mini' },
+    { name: 'GPT-5 nano', value: 'gpt-5-nano' },
+    { name: 'GPT-5.2 pro', value: 'gpt-5.2-pro' },
+    { name: 'GPT-5', value: 'gpt-5' },
+    { name: 'GPT-4.1', value: 'gpt-4.1' },
+    { name: 'GPT-4.1 mini', value: 'gpt-4.1-mini' },
+    { name: 'GPT-4.1 nano', value: 'gpt-4.1-nano' },
+    { name: 'GPT-4o', value: 'gpt-4o' },
     { name: 'GPT-4o mini', value: 'gpt-4o-mini' },
     { name: 'GPT-4 Turbo', value: 'gpt-4-turbo' },
     { name: 'GPT-4', value: 'gpt-4' },
   ],
   grok: [
-    { name: 'Grok 2 (recommended)', value: 'grok-2' },
-    { name: 'Grok 2 mini', value: 'grok-2-mini' },
+    { name: 'Grok 4.1 Fast reasoning (recommended)', value: 'grok-4-1-fast-reasoning' },
+    { name: 'Grok 4.1 Fast non-reasoning', value: 'grok-4-1-fast-non-reasoning' },
+    { name: 'Grok 4', value: 'grok-4-0709' },
+    { name: 'Grok 4 Fast reasoning', value: 'grok-4-fast-reasoning' },
+    { name: 'Grok 4 Fast non-reasoning', value: 'grok-4-fast-non-reasoning' },
+    { name: 'Grok 3', value: 'grok-3' },
+    { name: 'Grok 3 mini', value: 'grok-3-mini' },
+    { name: 'Grok 2 vision', value: 'grok-2-vision-1212' },
+    { name: 'Grok 2', value: 'grok-2' },
   ],
   anthropic: [
-    { name: 'Claude 3.5 Sonnet (recommended)', value: 'claude-3-5-sonnet-20241022' },
+    { name: 'Claude Opus 4.6 (recommended)', value: 'claude-opus-4-6' },
+    { name: 'Claude Sonnet 4.5', value: 'claude-sonnet-4-5-20250929' },
+    { name: 'Claude Haiku 4.5', value: 'claude-haiku-4-5-20251001' },
+    { name: 'Claude 3.5 Sonnet', value: 'claude-3-5-sonnet-20241022' },
     { name: 'Claude 3.5 Haiku', value: 'claude-3-5-haiku-20241022' },
     { name: 'Claude 3 Opus', value: 'claude-3-opus-20240229' },
   ],
@@ -126,12 +158,13 @@ const VISION_FALLBACK_CHOICES = [
   { name: 'Anthropic Claude (vision)', value: 'anthropic' },
 ];
 
-/** True if this provider+model is known to support vision (e.g. GPT-4o, Claude 3.x). */
+/** True if this provider+model is known to support vision (e.g. GPT-4o/5.x, Claude 3/4.x, Grok 4.x/2-vision). */
 function isVisionCapable(provider, modelId) {
   const p = (provider || '').toLowerCase();
   const m = (modelId || '').toLowerCase();
-  if (p === 'openai') return /^gpt-4/.test(m);
-  if (p === 'anthropic') return /^claude-3/.test(m);
+  if (p === 'openai') return /^gpt-(4|5)/.test(m);
+  if (p === 'anthropic') return /^claude-(3|opus-4|sonnet-4|haiku-4)/.test(m);
+  if (p === 'grok' || p === 'xai') return /^grok-(4|2-vision)/.test(m);
   return false;
 }
 
@@ -329,6 +362,7 @@ async function onboarding() {
         { name: 'Anthropic', value: 'anthropic' },
         { name: 'Quit', value: 'quit' },
       ],
+      theme: selectTheme(),
     });
   } catch (err) {
     if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
@@ -381,6 +415,7 @@ async function onboarding() {
       visionFallbackProvider = await select({
         message: q('Vision fallback for image reading? (when your main model is text-only)'),
         choices: VISION_FALLBACK_CHOICES,
+        theme: selectTheme(),
       });
     } catch (err) {
       if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
@@ -401,7 +436,7 @@ async function onboarding() {
       : await selectModel(q('Anthropic vision model'), CLOUD_LLM_MODELS.anthropic);
     config.skills.vision.fallback = {
       provider: visionFallbackProvider,
-      model: visionModel || (visionFallbackProvider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022'),
+      model: visionModel || (visionFallbackProvider === 'openai' ? 'gpt-5.2' : 'claude-sonnet-4-5-20250929'),
       apiKey: visionFallbackProvider === 'openai' ? 'LLM_1_API_KEY' : 'LLM_3_API_KEY',
     };
     saveConfig(config);
@@ -495,6 +530,7 @@ async function main() {
           { name: 'WhatsApp (link your phone)', value: 'whatsapp' },
           { name: 'Telegram (bot token from @BotFather)', value: 'telegram' },
         ],
+        theme: selectTheme(),
       });
       messagingFirst = choice;
     } catch (err) {

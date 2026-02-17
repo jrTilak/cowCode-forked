@@ -43,10 +43,10 @@ function cloudModelEnv(provider) {
 
 /** Default model per provider when the *_MODEL env var is not set. */
 const DEFAULT_CLOUD_MODELS = {
-  openai: 'gpt-4o-mini',
-  grok: 'grok-2',
-  xai: 'grok-2',
-  anthropic: 'claude-3-5-sonnet-20241022',
+  openai: 'gpt-5.2',
+  grok: 'grok-4-1-fast-reasoning',
+  xai: 'grok-4-1-fast-reasoning',
+  anthropic: 'claude-sonnet-4-5-20250929',
   together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
   deepseek: 'deepseek-chat',
 };
