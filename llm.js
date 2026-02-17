@@ -142,6 +142,9 @@ function loadConfig() {
 
 /** Call Anthropic Messages API and return a Response-like with OpenAI-shaped JSON. */
 async function callAnthropic(messages, { apiKey, model, maxTokens }, tools) {
+  if (!apiKey || apiKey === 'not-needed' || String(apiKey).trim() === '') {
+    return { ok: false, status: 401, text: () => Promise.resolve(JSON.stringify({ error: { message: 'Anthropic API key not set (set LLM_3_API_KEY in ~/.cowcode/.env)' } })) };
+  }
   const url = 'https://api.anthropic.com/v1/messages';
   let system = '';
   const anthropicMessages = [];
@@ -182,16 +185,22 @@ async function callAnthropic(messages, { apiKey, model, maxTokens }, tools) {
   };
 }
 
+/** OpenAI newer models (e.g. GPT-5.x) require max_completion_tokens instead of max_tokens. */
+function openaiUsesMaxCompletionTokens(model) {
+  return typeof model === 'string' && /^gpt-5/.test(model);
+}
+
 function callOne(messages, { baseUrl, apiKey, model, maxTokens }, tools = null) {
   const isAnthropic = (baseUrl || '').includes('anthropic.com');
   if (isAnthropic) {
     return callAnthropic(messages, { apiKey, model, maxTokens }, tools);
   }
   const url = (baseUrl || '').replace(/\/$/, '') + '/chat/completions';
+  const isOpenAINew = (baseUrl || '').includes('openai.com') && openaiUsesMaxCompletionTokens(model);
   const body = {
     model,
     messages,
-    max_tokens: maxTokens,
+    ...(isOpenAINew ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
     stream: false,
     ...(tools && tools.length > 0 ? { tools } : {}),
   };
@@ -373,6 +382,7 @@ export async function describeImage(imageUrlOrDataUri, prompt, systemPrompt = 'Y
   for (const opts of candidates) {
     const label = opts.model || opts.baseUrl?.replace(/^https?:\/\//, '').slice(0, 20) || 'unknown';
     const isAnthropic = (opts.baseUrl || '').includes('anthropic.com');
+    if (isAnthropic && (!opts.apiKey || opts.apiKey === 'not-needed' || String(opts.apiKey || '').trim() === '')) continue;
     try {
       let res;
       if (isAnthropic && userContentAnthropic) {

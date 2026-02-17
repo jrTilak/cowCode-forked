@@ -11,6 +11,7 @@ import { loadJobs, removeJob, updateJob } from './store.js';
 import { isTelegramChatId } from '../lib/telegram.js';
 import { addPending as addPendingTelegram } from '../lib/pending-telegram.js';
 import { getCronStorePath, getWorkspaceDir } from '../lib/paths.js';
+import { toUserMessage } from '../lib/user-error.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
@@ -137,7 +138,7 @@ async function runJob({ job, sock, selfJid }) {
     }
   }
   try {
-    await sendCronReply(jid, `[CowCode] Moo — reminder "${job.name}" didn't go through: ${lastErr?.message || 'Unknown error'}`);
+    await sendCronReply(jid, `[CowCode] Moo — reminder "${job.name}" didn't go through. ${toUserMessage(lastErr)}`);
   } catch (_) {}
 }
 

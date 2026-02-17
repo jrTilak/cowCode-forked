@@ -36,6 +36,7 @@ import { getSchedulingTimeContext } from './lib/timezone.js';
 import { getMemoryConfig } from './lib/memory-config.js';
 import { indexChatExchange } from './lib/memory-index.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
+import { toUserMessage } from './lib/user-error.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -500,7 +501,7 @@ async function main() {
         const jidKey = String(chatId);
         runAgentWithSkills(sock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }).catch((err) => {
           console.error('Telegram agent error:', err.message);
-          const errorText = `Moo — something went wrong: ${err.message}`;
+          const errorText = 'Moo — ' + toUserMessage(err);
           optsTelegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
         });
       });
@@ -636,14 +637,14 @@ async function main() {
 
         runAgentWithSkills(sock, jid, userText, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }).catch((err) => {
           console.error('Background agent error:', err.message);
-          const errorText = `[CowCode] Moo — something went wrong: ${err.message}`;
+          const errorText = '[CowCode] Moo — ' + toUserMessage(err);
           sock.sendMessage(jid, { text: errorText }).catch(() => {
             pendingReplies.push({ jid, text: errorText });
           });
         });
       } catch (err) {
         console.error('LLM error:', err.message);
-        const errorText = `[CowCode] Moo — something went wrong: ${err.message}`;
+        const errorText = '[CowCode] Moo — ' + toUserMessage(err);
         try {
           await sock.sendMessage(jid, { text: errorText });
         } catch (_) {
@@ -700,7 +701,7 @@ async function main() {
       const jidKey = String(chatId);
       runAgentWithSkills(telegramSock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }).catch((err) => {
         console.error('Telegram agent error:', err.message);
-        const errorText = `Moo — something went wrong: ${err.message}`;
+        const errorText = 'Moo — ' + toUserMessage(err);
         telegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
       });
     });
