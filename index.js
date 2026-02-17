@@ -51,8 +51,63 @@ const authOnly = process.argv.includes('--auth-only');
 const pairIndex = process.argv.indexOf('--pair');
 const pairNumber = pairIndex !== -1 ? process.argv[pairIndex + 1] : null;
 
+// Keys we never log (signal/session key material and noisy proto fields)
+const REDACT_KEYS = new Set([
+  'indexInfo', 'baseKey', 'baseKeyType', 'remoteIdentityKey', 'pendingPreKey',
+  'signedKeyId', 'keyPair', 'private', 'public', 'signature', 'identifierKey',
+]);
+
+function redactForLog(obj) {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Buffer.isBuffer(obj) || (typeof Uint8Array !== 'undefined' && obj instanceof Uint8Array)) return '[Buffer]';
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (REDACT_KEYS.has(k)) {
+      out[k] = '[redacted]';
+      continue;
+    }
+    out[k] = redactForLog(v);
+  }
+  return out;
+}
+
 // In auth mode show connection errors so we can see why linking fails
-const logger = pino({ level: authOnly ? 'error' : 'silent' });
+const pinoLogger = pino({ level: authOnly ? 'error' : 'silent' });
+function logWithRedact(pinoInstance, level, a, b) {
+  if (typeof a === 'string' && b === undefined) {
+    pinoInstance[level](a);
+    return;
+  }
+  const obj = typeof a === 'object' && a !== null ? redactForLog(a) : a;
+  const msg = b;
+  pinoInstance[level](obj, msg);
+}
+
+const logger = {
+  get level() { return pinoLogger.level; },
+  set level(v) { pinoLogger.level = v; },
+  child(bindings) {
+    return wrapForRedaction(pinoLogger.child(bindings));
+  },
+  trace(a, b) { logWithRedact(pinoLogger, 'trace', a, b); },
+  debug(a, b) { logWithRedact(pinoLogger, 'debug', a, b); },
+  info(a, b) { logWithRedact(pinoLogger, 'info', a, b); },
+  warn(a, b) { logWithRedact(pinoLogger, 'warn', a, b); },
+  error(a, b) { logWithRedact(pinoLogger, 'error', a, b); },
+};
+
+function wrapForRedaction(pinoInstance) {
+  return {
+    get level() { return pinoInstance.level; },
+    set level(v) { pinoInstance.level = v; },
+    child(b) { return wrapForRedaction(pinoInstance.child(b)); },
+    trace(a, b) { logWithRedact(pinoInstance, 'trace', a, b); },
+    debug(a, b) { logWithRedact(pinoInstance, 'debug', a, b); },
+    info(a, b) { logWithRedact(pinoInstance, 'info', a, b); },
+    warn(a, b) { logWithRedact(pinoInstance, 'warn', a, b); },
+    error(a, b) { logWithRedact(pinoInstance, 'error', a, b); },
+  };
+}
 
 const DISCONNECT_REASONS = {
   401: 'Logged out',
@@ -84,11 +139,12 @@ function sleep(ms) {
 async function connectWhatsApp() {
   const { version } = await fetchLatestBaileysVersion();
   const { state, saveCreds } = await useMultiFileAuthState(getAuthDir());
+  const keyStoreLogger = wrapForRedaction(pino({ level: 'silent' }));
   const sock = makeWASocket({
     version,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+      keys: makeCacheableSignalKeyStore(state.keys, keyStoreLogger),
     },
     logger,
   });
@@ -111,11 +167,12 @@ async function runAuthOnly(opts = {}) {
   const { version } = await fetchLatestBaileysVersion();
   const { state, saveCreds } = await useMultiFileAuthState(getAuthDir());
 
+  const keyStoreLogger = wrapForRedaction(pino({ level: 'silent' }));
   const sock = makeWASocket({
     version,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+      keys: makeCacheableSignalKeyStore(state.keys, keyStoreLogger),
     },
     logger,
   });
