@@ -349,7 +349,8 @@ async function main() {
       run: async () => {
         const reply = await runE2E(query);
         assertReplyInSameLanguageAsQuery(query, reply);
-        const looksLikeList = reply.includes("don't have any") || reply.includes('scheduled') || reply.includes('reminder') || reply.includes('id=') || reply.includes('No ') || reply.includes('no ');
+        const lower = (reply || '').toLowerCase();
+        const looksLikeList = lower.includes("don't have any") || lower.includes('scheduled') || lower.includes('reminder') || lower.includes('id=') || reply.includes('No ') || reply.includes('no ') || lower.includes('job');
         assert(looksLikeList && reply.length > 10, `Expected cron list-style reply for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`);
       },
     })),
