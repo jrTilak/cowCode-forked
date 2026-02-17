@@ -111,9 +111,10 @@ async function runJobOnce({ job, sock, selfJid }) {
 
 /**
  * Run a cron job with up to 2 retries on failure (exponential backoff: 5s, 15s).
+ * Exported for E2E tests that verify the send path (recording transport).
  * @param {Object} opts - same as runJobOnce
  */
-async function runJob({ job, sock, selfJid }) {
+export async function runJob({ job, sock, selfJid }) {
   const jid = job.jid || selfJid;
   if (!jid) {
     console.error('[cron] No JID for job', job.id, job.name);

@@ -24,6 +24,7 @@ import { readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync } from
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { homedir, tmpdir } from 'os';
+import { runSkillTests } from './skill-test-runner.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -309,182 +310,135 @@ async function runReport() {
   ];
   writeFileSync(outPath, lines.join('\n'), 'utf8');
   console.log('\nWrote', outPath);
-  process.exit(0);
 }
 
 async function main() {
-  if (process.argv.includes('--report')) {
-    await runReport();
-    return;
-  }
-  let passed = 0;
-  let failed = 0;
-
   console.log('E2E cron tests: intent → LLM → cron tool → reply.');
   console.log('Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.');
   if (INSTALL_ROOT !== ROOT) console.log('Using system install (COWCODE_INSTALL_DIR):', INSTALL_ROOT);
   console.log('');
 
-  console.log('--- Cron (list) ---\n');
-  for (const query of CRON_LIST_QUERIES) {
-    try {
-      const reply = await runE2E(query);
-      assertReplyInSameLanguageAsQuery(query, reply);
-      const looksLikeList = reply.includes("don't have any") || reply.includes('scheduled') || reply.includes('reminder') || reply.includes('id=') || reply.includes('No ') || reply.includes('no ');
-      assert(
-        looksLikeList && reply.length > 10,
-        `Expected cron list-style reply for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`
-      );
-      console.log(`  ✓ "${query}"`);
-      passed++;
-    } catch (err) {
-      console.log(`  ✗ "${query}": ${err.message}`);
-      failed++;
-    }
-  }
-
-  console.log('\n--- Cron (add) ---\n');
-  for (const query of CRON_ADD_QUERIES) {
-    try {
-      const reply = await runE2E(query);
-      assertReplyInSameLanguageAsQuery(query, reply);
-      const looksLikeConfirmation = /scheduled|set|added|reminder|in \d+ minute|at \d+:|will send|will remind/i.test(reply) || reply.length > 20;
-      assert(
-        looksLikeConfirmation,
-        `Expected cron add confirmation for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`
-      );
-      console.log(`  ✓ "${query}"`);
-      passed++;
-    } catch (err) {
-      console.log(`  ✗ "${query}": ${err.message}`);
-      failed++;
-    }
-  }
-
-  console.log('\n--- Cron (add) — exact job count (no duplicates) ---\n');
   const singleAddQuery = 'Remind me to check lock after two minutes';
-  try {
-    const { stateDir, storePath } = createTempStateDir();
-    const reply = await runE2E(singleAddQuery, { stateDir });
-    assertReplyInSameLanguageAsQuery(singleAddQuery, reply);
-    const looksLikeConfirmation = /scheduled|set|added|reminder|in \d+ minute|will send|will remind|timer|done/i.test(reply) || reply.length > 15;
-    assert(looksLikeConfirmation, `Expected add confirmation. Got: ${reply.slice(0, 300)}`);
-    const { jobs } = loadStore(storePath);
-    assert(jobs.length === 1, `One "add" message must create exactly one job; got ${jobs.length}. Duplicate-add bug.`);
-    const atTimes = jobs.filter((j) => j.schedule?.kind === 'at' && j.schedule?.at).map((j) => j.schedule.at);
-    const uniqueAt = new Set(atTimes);
-    assert(uniqueAt.size === atTimes.length, `All one-shot jobs must have unique "at" times; got duplicates.`);
-    console.log(`  ✓ "${singleAddQuery}" → store has exactly 1 job, no duplicate at`);
-    passed++;
-  } catch (err) {
-    console.log(`  ✗ "${singleAddQuery}": ${err.message}`);
-    failed++;
-  }
-
-  console.log('\n--- Cron (add) — recurring (every 5 min, every morning, etc.) ---\n');
-  for (const { query, expectedExpr } of CRON_RECURRING_ADD_QUERIES) {
-    try {
-      const { stateDir, storePath } = createTempStateDir();
-      const reply = await runE2E(query, { stateDir });
-      assertReplyInSameLanguageAsQuery(query, reply);
-      const looksLikeConfirmation = /scheduled|set|added|reminder|every|daily|will send|will remind/i.test(reply) || reply.length > 20;
-      assert(
-        looksLikeConfirmation,
-        `Expected recurring add confirmation for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`
-      );
-      const { jobs } = loadStore(storePath);
-      const cronJobs = jobs.filter((j) => j.schedule?.kind === 'cron' && j.schedule?.expr);
-      assert(cronJobs.length >= 1, `Expected at least one cron (recurring) job for "${query}"; got ${jobs.length} jobs, cron: ${cronJobs.length}.`);
-      if (expectedExpr) {
-        const found = cronJobs.some((j) => j.schedule.expr === expectedExpr);
-        assert(found, `Expected cron expr "${expectedExpr}" for "${query}". Got: ${cronJobs.map((j) => j.schedule.expr).join(', ')}`);
-      }
-      console.log(`  ✓ "${query}" → cron ${cronJobs[0]?.schedule?.expr ?? '—'}`);
-      passed++;
-    } catch (err) {
-      console.log(`  ✗ "${query}": ${err.message}`);
-      failed++;
-    }
-  }
-
-  console.log('\n--- Cron (execute) — force run job output ---\n');
-  try {
-    const message = 'Reply with exactly: Cron E2E execute test OK';
-    const result = await runJobOnce(message, { stateDir: DEFAULT_STATE_DIR });
-    assert(!result.error, `run-job should not return error; got: ${result.error}`);
-    assert(
-      result.textToSend && result.textToSend.length > 0,
-      `run-job should return non-empty textToSend; got: ${JSON.stringify(result)}`
-    );
-    // Prefer reply that echoes the test phrase; accept any non-trivial reply as valid output
-    const hasExpected = /Cron E2E execute test OK|execute test OK/i.test(result.textToSend);
-    assert(
-      result.textToSend.length > 10 && (hasExpected || result.textToSend.length > 30),
-      `run-job should return substantive reply; got (first 200): ${result.textToSend.slice(0, 200)}`
-    );
-    console.log(`  ✓ run-job returned textToSend (${result.textToSend.length} chars)`);
-    passed++;
-  } catch (err) {
-    console.log(`  ✗ run-job: ${err.message}`);
-    failed++;
-  }
-
-  console.log('\n--- Cron (one-shot when Telegram-only: no sock, only telegramBot) ---\n');
-  try {
-    const { stateDir, storePath } = createTempStateDir();
-    const runnerPath = pathToFileURL(join(INSTALL_ROOT, 'cron', 'runner.js')).href;
-    const storePathMod = pathToFileURL(join(INSTALL_ROOT, 'cron', 'store.js')).href;
-    const runner = await import(runnerPath);
-    const store = await import(storePathMod);
-    const atTime = new Date(Date.now() + 120_000).toISOString(); // 2 min from now
-    runner.startCron({ storePath, telegramBot: {} }); // No sock — simulates Telegram-only
-    const job = store.addJob(
-      {
-        name: 'E2E Telegram one-shot',
-        message: 'hi',
-        schedule: { kind: 'at', at: atTime },
-        jid: '7656021862', // Telegram-style chat id
+  const tests = [
+    ...CRON_ADD_QUERIES.map((query) => ({
+      name: `cron add: "${query}"`,
+      run: async () => {
+        const reply = await runE2E(query);
+        assertReplyInSameLanguageAsQuery(query, reply);
+        const looksLikeConfirmation = /scheduled|set|added|reminder|in \d+ minute|at \d+:|will send|will remind/i.test(reply) || reply.length > 20;
+        assert(looksLikeConfirmation, `Expected cron add confirmation for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`);
       },
-      storePath
-    );
-    runner.scheduleOneShot(job);
-    const count = runner.getOneShotCountForTest();
-    assert(count === 1, `One-shot must be scheduled when only telegramBot is set (Telegram-only). Got getOneShotCountForTest()=${count}. Regression: scheduleOneShot required currentSock and skipped scheduling.`);
-    console.log('  ✓ One-shot scheduled when startCron had only telegramBot (no sock)');
-    passed++;
-  } catch (err) {
-    console.log(`  ✗ One-shot when Telegram-only: ${err.message}`);
-    failed++;
-  }
+    })),
+    {
+      name: `cron add: exact job count — "${singleAddQuery}"`,
+      run: async () => {
+        const { stateDir, storePath } = createTempStateDir();
+        const reply = await runE2E(singleAddQuery, { stateDir });
+        assertReplyInSameLanguageAsQuery(singleAddQuery, reply);
+        const looksLikeConfirmation = /scheduled|set|added|reminder|in \d+ minute|will send|will remind|timer|done/i.test(reply) || reply.length > 15;
+        assert(looksLikeConfirmation, `Expected add confirmation. Got: ${reply.slice(0, 300)}`);
+        const { jobs } = loadStore(storePath);
+        assert(jobs.length === 1, `One "add" message must create exactly one job; got ${jobs.length}. Duplicate-add bug.`);
+        const atTimes = jobs.filter((j) => j.schedule?.kind === 'at' && j.schedule?.at).map((j) => j.schedule.at);
+        assert(new Set(atTimes).size === atTimes.length, `All one-shot jobs must have unique "at" times; got duplicates.`);
+      },
+    },
+    // List after adds so we have reminders to list (or a meaningful empty state after setup).
+    ...CRON_LIST_QUERIES.map((query) => ({
+      name: `cron list: "${query}"`,
+      run: async () => {
+        const reply = await runE2E(query);
+        assertReplyInSameLanguageAsQuery(query, reply);
+        const looksLikeList = reply.includes("don't have any") || reply.includes('scheduled') || reply.includes('reminder') || reply.includes('id=') || reply.includes('No ') || reply.includes('no ');
+        assert(looksLikeList && reply.length > 10, `Expected cron list-style reply for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`);
+      },
+    })),
+    ...CRON_RECURRING_ADD_QUERIES.map(({ query, expectedExpr }) => ({
+      name: `cron recurring: "${query}"`,
+      run: async () => {
+        const { stateDir, storePath } = createTempStateDir();
+        const reply = await runE2E(query, { stateDir });
+        assertReplyInSameLanguageAsQuery(query, reply);
+        const looksLikeConfirmation = /scheduled|set|added|reminder|every|daily|will send|will remind/i.test(reply) || reply.length > 20;
+        assert(looksLikeConfirmation, `Expected recurring add confirmation for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`);
+        const { jobs } = loadStore(storePath);
+        const cronJobs = jobs.filter((j) => j.schedule?.kind === 'cron' && j.schedule?.expr);
+        assert(cronJobs.length >= 1, `Expected at least one cron (recurring) job for "${query}"; got ${jobs.length} jobs, cron: ${cronJobs.length}.`);
+        if (expectedExpr) {
+          const found = cronJobs.some((j) => j.schedule.expr === expectedExpr);
+          assert(found, `Expected cron expr "${expectedExpr}" for "${query}". Got: ${cronJobs.map((j) => j.schedule.expr).join(', ')}`);
+        }
+      },
+    })),
+    {
+      name: 'cron execute: run-job textToSend',
+      run: async () => {
+        const message = 'Reply with exactly: Cron E2E execute test OK';
+        const result = await runJobOnce(message, { stateDir: DEFAULT_STATE_DIR });
+        assert(!result.error, `run-job should not return error; got: ${result.error}`);
+        assert(result.textToSend && result.textToSend.length > 0, `run-job should return non-empty textToSend; got: ${JSON.stringify(result)}`);
+        const hasExpected = /Cron E2E execute test OK|execute test OK/i.test(result.textToSend);
+        assert(result.textToSend.length > 10 && (hasExpected || result.textToSend.length > 30), `run-job should return substantive reply; got (first 200): ${result.textToSend.slice(0, 200)}`);
+      },
+    },
+    {
+      name: 'cron one-shot when Telegram-only (no sock)',
+      run: async () => {
+        const { stateDir, storePath } = createTempStateDir();
+        const runnerPath = pathToFileURL(join(INSTALL_ROOT, 'cron', 'runner.js')).href;
+        const storePathMod = pathToFileURL(join(INSTALL_ROOT, 'cron', 'store.js')).href;
+        const runner = await import(runnerPath);
+        const store = await import(storePathMod);
+        const atTime = new Date(Date.now() + 120_000).toISOString();
+        runner.startCron({ storePath, telegramBot: {} });
+        const job = store.addJob({ name: 'E2E Telegram one-shot', message: 'hi', schedule: { kind: 'at', at: atTime }, jid: '7656021862' }, storePath);
+        runner.scheduleOneShot(job);
+        const count = runner.getOneShotCountForTest();
+        assert(count === 1, `One-shot must be scheduled when only telegramBot is set. Got getOneShotCountForTest()=${count}.`);
+      },
+    },
+    {
+      name: 'cron send to channel (recording transport)',
+      run: async () => {
+        const { stateDir, storePath } = createTempStateDir();
+        const runnerPath = pathToFileURL(join(INSTALL_ROOT, 'cron', 'runner.js')).href;
+        const storePathMod = pathToFileURL(join(INSTALL_ROOT, 'cron', 'store.js')).href;
+        const runner = await import(runnerPath);
+        const store = await import(storePathMod);
+        const sent = [];
+        const spyTelegramBot = {
+          sendMessage: async (jid, text) => {
+            sent.push({ jid: String(jid), text: String(text) });
+            return { message_id: 1 };
+          },
+        };
+        runner.startCron({ storePath, telegramBot: spyTelegramBot });
+        const job = store.addJob(
+          { name: 'Channel send test', message: 'Reply with exactly: channel send test OK', schedule: { kind: 'at', at: new Date(Date.now() + 60_000).toISOString() }, jid: '999888777' },
+          storePath
+        );
+        await runner.runJob({ job, sock: null, selfJid: null });
+        assert(sent.length === 1, `sendMessage must be called exactly once; got ${sent.length}`);
+        assert(sent[0].jid === '999888777', `Expected jid 999888777; got ${sent[0].jid}`);
+        assert(sent[0].text.includes('channel send test OK') || sent[0].text.length > 10, `Reply must contain expected phrase or be substantive; got (first 120): ${sent[0].text.slice(0, 120)}`);
+      },
+    },
+    ...REMINDER_MANAGE_QUERIES.map((query) => ({
+      name: `cron manage: "${query}"`,
+      run: async () => {
+        const reply = await runE2E(query);
+        assertReplyInSameLanguageAsQuery(query, reply);
+        const listStyle = reply.includes("don't have any") || reply.includes('scheduled') || reply.includes('reminder') || reply.includes('id=') || reply.includes('No ') || reply.includes('no ') || (reply.includes('list') && (reply.includes('cron') || reply.includes('tool') || reply.includes('answered')));
+        const removeStyle = /removed|not found|delete|remove|job \d|by id|one at a time/i.test(reply);
+        assert((listStyle || removeStyle) && reply.length > 5, `Expected cron list/remove-style reply for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`);
+      },
+    })),
+  ];
 
-  console.log('\n--- Cron (manage: list / remove) ---\n');
-  for (const query of REMINDER_MANAGE_QUERIES) {
-    try {
-      const reply = await runE2E(query);
-      assertReplyInSameLanguageAsQuery(query, reply);
-      const listStyle =
-        reply.includes("don't have any") ||
-        reply.includes('scheduled') ||
-        reply.includes('reminder') ||
-        reply.includes('id=') ||
-        reply.includes('No ') ||
-        reply.includes('no ') ||
-        (reply.includes('list') && (reply.includes('cron') || reply.includes('tool') || reply.includes('answered')));
-      const removeStyle = /removed|not found|delete|remove|job \d|by id|one at a time/i.test(reply);
-      assert(
-        (listStyle || removeStyle) && reply.length > 5,
-        `Expected cron list/remove-style reply for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`
-      );
-      console.log(`  ✓ "${query}"`);
-      passed++;
-    } catch (err) {
-      console.log(`  ✗ "${query}": ${err.message}`);
-      failed++;
-    }
-  }
+  const { passed, failed } = await runSkillTests('cron', tests);
 
-  console.log('\n--- Result ---');
-  console.log(`Passed: ${passed}, Failed: ${failed}`);
+  console.log('\n--- Report ---');
+  await runReport();
   process.exit(failed > 0 ? 1 : 0);
 }
 

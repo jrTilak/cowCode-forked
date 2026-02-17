@@ -11,6 +11,7 @@ import { readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync, readd
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, tmpdir } from 'os';
+import { runSkillTests } from './skill-test-runner.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -150,78 +151,53 @@ function isNoLlmError(err) {
 }
 
 async function main() {
-  let passed = 0;
-  let failed = 0;
-  let skippedDueToLlm = false;
-
   console.log('E2E memory tests: chat log written + memory recall (needs embedding for recall).');
   console.log('Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.');
   if (INSTALL_ROOT !== ROOT) console.log('Using system install (COWCODE_INSTALL_DIR):', INSTALL_ROOT);
   console.log('');
 
-  // --- Chat log written ---
-  console.log('--- Memory: chat log written ---\n');
   const storeMessage = `Memory e2e test message at ${Date.now()}.`;
-  try {
-    const { stateDir, workspaceDir } = createTempStateDir();
-    const reply = await runE2E(storeMessage, { stateDir });
-    assert(reply && reply.length > 0, 'Expected non-empty reply');
-    const log = getLatestChatLog(workspaceDir);
-    assert(log && log.lines.length >= 1, 'Expected at least one line in chat-log');
-    const lastLine = log.lines[log.lines.length - 1];
-    let parsed;
-    try {
-      parsed = JSON.parse(lastLine);
-    } catch (_) {
-      throw new Error('Chat log last line is not valid JSON');
-    }
-    assert(
-      parsed.user === storeMessage,
-      `Expected last exchange user to match. Got user: ${(parsed.user || '').slice(0, 80)}`
-    );
-    assert(
-      parsed.assistant && parsed.assistant.length > 0,
-      'Expected non-empty assistant reply in chat log'
-    );
-    console.log(`  ✓ Chat log contains exchange (${log.lines.length} line(s))`);
-    passed++;
-  } catch (err) {
-    if (isNoLlmError(err)) skippedDueToLlm = true;
-    console.log(`  ✗ Chat log: ${err.message}`);
-    failed++;
-  }
-
-  // --- Memory recall (store phrase then ask for it) ---
-  console.log('\n--- Memory: recall (store phrase → ask for it) ---\n');
   const storePhraseMessage = `Remember this exact phrase for the next message: ${MEMORY_RECALL_PHRASE}.`;
   const recallQuery = `What was the exact phrase I asked you to remember in the previous message? Reply with only that phrase.`;
-  try {
-    const { stateDir } = createTempStateDir();
-    const reply1 = await runE2E(storePhraseMessage, { stateDir });
-    assert(reply1 && reply1.length > 0, 'Expected non-empty first reply');
-    const reply2 = await runE2E(recallQuery, { stateDir });
-    assert(
-      reply2 && reply2.includes(MEMORY_RECALL_PHRASE),
-      `Expected reply to contain "${MEMORY_RECALL_PHRASE}". Got (first 300 chars): ${(reply2 || '').slice(0, 300)}. If embedding is not configured, set memory.embedding or use an LLM provider with embeddings.`
-    );
-    console.log(`  ✓ Recall reply contained "${MEMORY_RECALL_PHRASE}"`);
-    passed++;
-  } catch (err) {
-    if (isNoLlmError(err)) skippedDueToLlm = true;
-    // Reply present but phrase missing often means embedding not configured (exchange not indexed).
-    const msg = (err && err.message) || '';
-    if (msg.includes('Expected reply to contain') && /can't see|don't have|not in memory|don't recall|couldn't find|no.*memory|embedding not available/i.test(msg)) {
-      skippedDueToLlm = true;
-    }
-    console.log(`  ✗ Recall: ${err.message}`);
-    failed++;
-  }
 
-  console.log('\n--- Result ---');
-  console.log(`Passed: ${passed}, Failed: ${failed}`);
-  if (failed > 0 && skippedDueToLlm) {
-    console.log('\nMemory E2E skipped: no working LLM or embedding (set LLM + embedding API key in .env for full recall test).');
-    process.exit(0);
+  const tests = [
+    {
+      name: 'memory: chat log written',
+      run: async () => {
+        const { stateDir, workspaceDir } = createTempStateDir();
+        const reply = await runE2E(storeMessage, { stateDir });
+        assert(reply && reply.length > 0, 'Expected non-empty reply');
+        const log = getLatestChatLog(workspaceDir);
+        assert(log && log.lines.length >= 1, 'Expected at least one line in chat-log');
+        const lastLine = log.lines[log.lines.length - 1];
+        let parsed;
+        try {
+          parsed = JSON.parse(lastLine);
+        } catch (_) {
+          throw new Error('Chat log last line is not valid JSON');
+        }
+        assert(parsed.user === storeMessage, `Expected last exchange user to match. Got user: ${(parsed.user || '').slice(0, 80)}`);
+        assert(parsed.assistant && parsed.assistant.length > 0, 'Expected non-empty assistant reply in chat log');
+      },
+    },
+    {
+      name: 'memory: recall (store phrase → ask for it)',
+      run: async () => {
+        const { stateDir } = createTempStateDir();
+        const reply1 = await runE2E(storePhraseMessage, { stateDir });
+        assert(reply1 && reply1.length > 0, 'Expected non-empty first reply');
+        const reply2 = await runE2E(recallQuery, { stateDir });
+        assert(
+          reply2 && reply2.includes(MEMORY_RECALL_PHRASE),
+          `Expected reply to contain "${MEMORY_RECALL_PHRASE}". Got (first 300 chars): ${(reply2 || '').slice(0, 300)}. If embedding is not configured, set memory.embedding or use an LLM provider with embeddings.`
+        );
+      },
+    },
+  ];
+
+  const { failed } = await runSkillTests('memory', tests);
+  if (failed > 0) {
+    console.log('\nMemory E2E: set LLM + embedding API key in .env for full recall test.');
   }
   process.exit(failed > 0 ? 1 : 0);
 }
