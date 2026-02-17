@@ -126,6 +126,15 @@ const VISION_FALLBACK_CHOICES = [
   { name: 'Anthropic Claude (vision)', value: 'anthropic' },
 ];
 
+/** True if this provider+model is known to support vision (e.g. GPT-4o, Claude 3.x). */
+function isVisionCapable(provider, modelId) {
+  const p = (provider || '').toLowerCase();
+  const m = (modelId || '').toLowerCase();
+  if (p === 'openai') return /^gpt-4/.test(m);
+  if (p === 'anthropic') return /^claude-3/.test(m);
+  return false;
+}
+
 /** Returns first available package manager: pnpm, npm, or yarn. */
 function getPackageManager() {
   for (const cmd of ['pnpm', 'npm', 'yarn']) {
@@ -351,21 +360,36 @@ async function onboarding() {
 
   const braveKey = await promptSecret(q('Brave Search API key – optional'), env.BRAVE_API_KEY || '');
 
-  // Vision fallback: for image reading when the main agent model is text-only. Set at setup; no mid-run prompts.
+  // Vision fallback: only ask when main model is text-only; skip step if main model already supports vision.
+  let mainModelSupportsVision = false;
+  if (provider !== 'skip') {
+    mainModelSupportsVision = isVisionCapable(provider, selectedModel);
+  } else {
+    config = loadConfig() || config;
+    const models = config?.llm?.models;
+    if (Array.isArray(models) && models.length > 0) {
+      const priority = models.find((m) => m.priority === true || m.priority === 1 || String(m.priority).toLowerCase() === 'true');
+      const main = priority || models[0];
+      mainModelSupportsVision = isVisionCapable(main.provider, main.model);
+    }
+  }
+
   let visionFallbackProvider = 'skip';
-  try {
-    const select = (await import('@inquirer/select')).default;
-    visionFallbackProvider = await select({
-      message: q('Vision fallback for image reading? (when your main model is text-only)'),
-      choices: VISION_FALLBACK_CHOICES,
-    });
-  } catch (err) {
-    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
-      const answer = await ask(q('Vision fallback?') + ' (skip / openai / anthropic, q to quit): ');
-      checkQuit(answer);
-      visionFallbackProvider = (answer || '').trim().toLowerCase() || 'skip';
-    } else {
-      throw err;
+  if (!mainModelSupportsVision) {
+    try {
+      const select = (await import('@inquirer/select')).default;
+      visionFallbackProvider = await select({
+        message: q('Vision fallback for image reading? (when your main model is text-only)'),
+        choices: VISION_FALLBACK_CHOICES,
+      });
+    } catch (err) {
+      if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+        const answer = await ask(q('Vision fallback?') + ' (skip / openai / anthropic, q to quit): ');
+        checkQuit(answer);
+        visionFallbackProvider = (answer || '').trim().toLowerCase() || 'skip';
+      } else {
+        throw err;
+      }
     }
   }
   if (visionFallbackProvider === 'openai' || visionFallbackProvider === 'anthropic') {
