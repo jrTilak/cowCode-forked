@@ -18,15 +18,20 @@ const ENV_EXAMPLE = join(ROOT, '.env.example');
 
 const C = { reset: '\x1b[0m', cyan: '\x1b[36m', dim: '\x1b[2m', green: '\x1b[32m', bold: '\x1b[1m' };
 
-/** Theme for @inquirer/select: same hint as default but add Ctrl+C quit. */
+/** Theme for @inquirer/select: always show navigate + select + Ctrl+C quit (never undefined so tooltip always visible). */
 function selectTheme() {
+  const tipParts = [
+    ['↑↓', 'navigate'],
+    ['⏎', 'select'],
+    ['Ctrl+C', 'quit'],
+  ];
+  const helpTipString = tipParts
+    .map(([k, a]) => `${C.bold}${k}${C.reset} ${C.dim}${a}${C.reset}`)
+    .join(C.dim + ' • ' + C.reset);
   return {
     style: {
-      keysHelpTip(keys) {
-        const withQuit = [...keys, ['Ctrl+C', 'quit']];
-        return withQuit
-          .map(([k, a]) => `${C.bold}${k}${C.reset} ${C.dim}${a}${C.reset}`)
-          .join(C.dim + ' • ' + C.reset);
+      keysHelpTip() {
+        return helpTipString;
       },
     },
   };
@@ -379,17 +384,17 @@ async function onboarding() {
   }
   let selectedModel = '';
   if (provider === 'openai') {
-    llm1Key = await promptSecret(q('OpenAI API key'), env.LLM_1_API_KEY || '');
     const models = CLOUD_LLM_MODELS.openai;
     selectedModel = await selectModel(q('OpenAI model version'), models);
+    llm1Key = await promptSecret(q('OpenAI API key'), env.LLM_1_API_KEY || '');
   } else if (provider === 'grok') {
-    llm2Key = await promptSecret(q('Grok API key'), env.LLM_2_API_KEY || '');
     const models = CLOUD_LLM_MODELS.grok;
     selectedModel = await selectModel(q('Grok model version'), models);
+    llm2Key = await promptSecret(q('Grok API key'), env.LLM_2_API_KEY || '');
   } else if (provider === 'anthropic') {
-    llm3Key = await promptSecret(q('Anthropic API key'), env.LLM_3_API_KEY || '');
     const models = CLOUD_LLM_MODELS.anthropic;
     selectedModel = await selectModel(q('Anthropic (Claude) model version'), models);
+    llm3Key = await promptSecret(q('Anthropic API key'), env.LLM_3_API_KEY || '');
   }
 
   const braveKey = await promptSecret(q('Brave Search API key – optional'), env.BRAVE_API_KEY || '');
