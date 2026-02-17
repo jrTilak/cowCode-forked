@@ -85,15 +85,15 @@ else
   trap - INT
   echo ""
   echo "  ------------------------------------------------"
-  echo "  To start the bot:  cowcode moo start"
-  echo "  (or from this folder:  npm start)"
-  echo ""
-  # New shell is created only after setup.js exits (e.g. after user presses Ctrl+C).
-  # Nothing runs automatically in the new shell — user runs cowcode moo start when they want the bot.
-  if [ "$ADDED_PATH" = 1 ] && [ -t 0 ]; then
-    echo "  ► Opening a new shell so  cowcode  works there. Run  cowcode moo start  when you want to start the bot."
-    exec "${SHELL:-/bin/zsh}" -l
+  # Start daemon in background (no new terminal); user can close this window.
+  export PATH="$BIN_DIR:$PATH"
+  export COWCODE_INSTALL_DIR="$INSTALL_DIR"
+  if "$BIN_DIR/cowcode" moo start; then
+    echo "  ► Bot is running in the background. You can close this terminal."
+  else
+    echo "  To start the bot later:  cowcode moo start"
   fi
+  echo ""
   exit 0
 fi
 echo ""

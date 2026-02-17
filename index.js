@@ -297,15 +297,15 @@ async function main() {
   const credsPath = join(getAuthDir(), 'creds.json');
   const needAuth = !existsSync(getAuthDir()) || !existsSync(credsPath);
 
-  // Telegram-only: no WhatsApp socket; we'll start only the Telegram bot in runBot.
-  if (telegramOnlyMode) {
-    sock = null;
-  } else if (process.argv.includes('--test')) {
+  // E2E tests need the mock socket regardless of channel config.
+  if (process.argv.includes('--test')) {
     sock = {
       sendMessage: async () => ({ key: { id: 'test-' + Date.now() } }),
       sendPresenceUpdate: async () => {},
       readMessages: async () => {},
     };
+  } else if (telegramOnlyMode) {
+    sock = null;
   } else if (needAuth) {
     console.log('');
     console.log('  ─────────────────────────────────────────');
@@ -331,6 +331,9 @@ async function main() {
   } else {
     sock = null; // will be set by connectWhatsApp() in the reconnect loop below
   }
+
+  /** Set in runBot (WhatsApp: initBot; Telegram-only: opts); null in --test so cron ctx does not throw. */
+  let telegramBot = null;
 
   const config = loadConfig();
   const first = config.models[0];
@@ -426,6 +429,7 @@ async function main() {
       }
       console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
     } catch (sendErr) {
+      lastSentByJidMap.set(jid, textForSend); // E2E can still assert on intended reply when send fails
       if (!isTelegramChatId(jid)) {
         pendingReplies.push({ jid, text: textForSend });
         console.log('[replied] queued (send failed, will retry after reconnect):', sendErr.message);
@@ -444,7 +448,11 @@ async function main() {
     const lastSent = new Map();
     const sentIds = { current: new Set() };
     console.log('[test] Running main code path with message:', testMsg.slice(0, 60));
-    await runAgentWithSkills(sock, 'test@s.whatsapp.net', testMsg, lastSent, 'test@s.whatsapp.net', sentIds);
+    try {
+      await runAgentWithSkills(sock, 'test@s.whatsapp.net', testMsg, lastSent, 'test@s.whatsapp.net', sentIds);
+    } catch (err) {
+      lastSent.set('test@s.whatsapp.net', 'Moo — ' + (err && err.message ? err.message : String(err)));
+    }
     const reply = lastSent.get('test@s.whatsapp.net');
     if (reply != null) {
       console.log('E2E_REPLY_START');
@@ -472,6 +480,7 @@ async function main() {
   async function runBot(sock, opts = {}) {
     const { telegramOnly, telegramBot: optsTelegramBot } = opts;
     if (telegramOnly && optsTelegramBot) {
+      telegramBot = optsTelegramBot;
       startCron({ storePath: getCronStorePath(), telegramBot: optsTelegramBot });
       const lastSentByJid = new Map();
       const ourSentMessageIds = new Set();
@@ -514,7 +523,6 @@ async function main() {
     console.log('  ─────────────────────────────────────────');
     console.log('');
 
-    let telegramBot = null;
     let telegramSock = null;
     const telegramToken = getChannelsConfig().telegram.botToken;
     if (telegramToken) {

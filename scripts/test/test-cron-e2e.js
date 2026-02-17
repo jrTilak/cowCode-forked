@@ -7,6 +7,10 @@
  * - For a single "add" message, the cron store has exactly one job (catches duplicate-add bugs).
  * We do NOT wait for one-shot delivery (would require keeping process alive and capturing sent messages).
  *
+ * "One-shot when Telegram-only" tests that scheduleOneShot() actually schedules when startCron was
+ * called with only telegramBot (no WhatsApp sock). Without this, one-shot reminders from Telegram
+ * would be stored but never scheduled, so the message would never be sent.
+ *
  * Why the "execute" test didn't catch the runner stdout bug: the test uses its own runJobOnce()
  * which parses the *last line* of run-job stdout. The production cron/runner.js used to parse
  * the *entire* stdout as JSON, so when run-job's child logged to stdout (e.g. [agent] run_skill),
@@ -18,7 +22,7 @@
 import { spawn } from 'child_process';
 import { readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { homedir, tmpdir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -422,6 +426,34 @@ async function main() {
     passed++;
   } catch (err) {
     console.log(`  ✗ run-job: ${err.message}`);
+    failed++;
+  }
+
+  console.log('\n--- Cron (one-shot when Telegram-only: no sock, only telegramBot) ---\n');
+  try {
+    const { stateDir, storePath } = createTempStateDir();
+    const runnerPath = pathToFileURL(join(INSTALL_ROOT, 'cron', 'runner.js')).href;
+    const storePathMod = pathToFileURL(join(INSTALL_ROOT, 'cron', 'store.js')).href;
+    const runner = await import(runnerPath);
+    const store = await import(storePathMod);
+    const atTime = new Date(Date.now() + 120_000).toISOString(); // 2 min from now
+    runner.startCron({ storePath, telegramBot: {} }); // No sock — simulates Telegram-only
+    const job = store.addJob(
+      {
+        name: 'E2E Telegram one-shot',
+        message: 'hi',
+        schedule: { kind: 'at', at: atTime },
+        jid: '7656021862', // Telegram-style chat id
+      },
+      storePath
+    );
+    runner.scheduleOneShot(job);
+    const count = runner.getOneShotCountForTest();
+    assert(count === 1, `One-shot must be scheduled when only telegramBot is set (Telegram-only). Got getOneShotCountForTest()=${count}. Regression: scheduleOneShot required currentSock and skipped scheduling.`);
+    console.log('  ✓ One-shot scheduled when startCron had only telegramBot (no sock)');
+    passed++;
+  } catch (err) {
+    console.log(`  ✗ One-shot when Telegram-only: ${err.message}`);
     failed++;
   }
 

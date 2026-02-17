@@ -205,10 +205,12 @@ export function startCron({ sock, selfJid, storePath, telegramBot }) {
 /**
  * Schedule a one-shot job to run at job.schedule.at. Uses current sock/selfJid/storePath from startCron.
  * Call this after addJob() when creating a job from chat (e.g. "send me X in N minutes").
+ * Requires at least one transport (WhatsApp sock or Telegram bot) so the reply can be sent when due.
  * @param {import('./store.js').CronJob} job - Job with schedule.kind === 'at'
  */
 export function scheduleOneShot(job) {
-  if (job.schedule?.kind !== 'at' || !job.schedule.at || !currentSock || !currentStorePath) return;
+  if (job.schedule?.kind !== 'at' || !job.schedule.at || !currentStorePath) return;
+  if (!currentSock && !currentTelegramBot) return;
   if (job.sentAtMs) return; // Already sent
   const atMs = new Date(job.schedule.at).getTime();
   const ms = atMs - Date.now();
@@ -231,4 +233,9 @@ export function stopCron() {
   scheduled.length = 0;
   for (const t of oneShotTimeouts) clearTimeout(t);
   oneShotTimeouts.length = 0;
+}
+
+/** For E2E tests: assert one-shot was scheduled when only Telegram (no WhatsApp sock). */
+export function getOneShotCountForTest() {
+  return oneShotTimeouts.length;
 }

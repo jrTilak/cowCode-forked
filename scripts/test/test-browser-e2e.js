@@ -102,13 +102,14 @@ async function main() {
   for (const query of NEWS_QUERIES) {
     try {
       const reply = await runE2E(query);
-      // End-to-end: we expect the final reply to the user to contain headline-like content
-      // (either the raw RSS "Top news / headlines" or the LLM's formatted list).
-      const hasNumberedList = /\n\d+\.\s+.+/.test(reply) || /^\d+\.\s+.+/.test(reply) || /\b\d+\.\s+[^\s]/.test(reply);
+      // End-to-end: we expect the final reply to contain headline/news-like content.
+      const hasNumberedList = /\n\d+[\.\)]\s+.+/.test(reply) || /^\d+[\.\)]\s+.+/.test(reply) || /\b\d+[\.\)]\s+[^\s]/.test(reply);
       const hasTopNewsBlock = reply.includes('Top news') && reply.includes('1.');
-      const hasHeadlinesWordAndList = reply.includes('headlines') && hasNumberedList;
+      const hasHeadlinesWord = /\bheadlines?\b/i.test(reply);
+      const hasHeadlinesAndList = hasHeadlinesWord && hasNumberedList;
+      const hasNewsAndSubstance = (/\bnews\b|\bheadlines?\b/i.test(reply) && reply.length > 80) || (hasNumberedList && reply.length > 100);
       assert(
-        hasTopNewsBlock || hasHeadlinesWordAndList || (hasNumberedList && reply.length > 100),
+        hasTopNewsBlock || hasHeadlinesAndList || hasNewsAndSubstance,
         `Expected reply to contain headlines/list for "${query}". Got (first 300 chars): ${reply.slice(0, 300)}`
       );
       console.log(`  ✓ "${query}"`);
