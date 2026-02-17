@@ -521,32 +521,39 @@ async function main() {
   const channels = configForChannels.channels || {};
   const whatsappDisabled = channels.whatsapp?.enabled === false;
   const bothAlreadySetUp = hasWhatsAppAuth && hasTelegramToken && !whatsappDisabled;
+  const onlyTelegramSetUp = hasTelegramToken && (!hasWhatsAppAuth || whatsappDisabled);
+  const onlyWhatsAppSetUp = hasWhatsAppAuth && !hasTelegramToken && !whatsappDisabled;
+  const neitherSetUp = !hasWhatsAppAuth && !hasTelegramToken;
 
   let messagingFirst = 'whatsapp';
   let telegramOnly = false;
 
   if (!bothAlreadySetUp) {
     section('Messaging');
-    try {
-      const select = (await import('@inquirer/select')).default;
-      const choice = await select({
-        message: q('Which do you want to set up first?'),
-        choices: [
-          { name: 'WhatsApp (link your phone)', value: 'whatsapp' },
-          { name: 'Telegram (bot token from @BotFather)', value: 'telegram' },
-        ],
-        theme: selectTheme(),
-      });
-      messagingFirst = choice;
-    } catch (err) {
-      if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
-        const answer = await ask(q('Which first?') + ' (1=WhatsApp 2=Telegram, q to quit): ');
-        checkQuit(answer);
-        messagingFirst = (answer || '1').trim() === '2' ? 'telegram' : 'whatsapp';
-      } else {
-        throw err;
+    // Only ask "which first?" when neither channel is set up; if one exists, skip to offering the other.
+    if (neitherSetUp) {
+      try {
+        const select = (await import('@inquirer/select')).default;
+        const choice = await select({
+          message: q('Which do you want to set up first?'),
+          choices: [
+            { name: 'WhatsApp (link your phone)', value: 'whatsapp' },
+            { name: 'Telegram (bot token from @BotFather)', value: 'telegram' },
+          ],
+          theme: selectTheme(),
+        });
+        messagingFirst = choice;
+      } catch (err) {
+        if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+          const answer = await ask(q('Which first?') + ' (1=WhatsApp 2=Telegram, q to quit): ');
+          checkQuit(answer);
+          messagingFirst = (answer || '1').trim() === '2' ? 'telegram' : 'whatsapp';
+        } else {
+          throw err;
+        }
       }
     }
+    // onlyTelegramSetUp or onlyWhatsAppSetUp: messagingFirst stays 'whatsapp' (offer the missing channel below)
   }
 
   if (!bothAlreadySetUp && messagingFirst === 'telegram') {
@@ -583,17 +590,43 @@ async function main() {
       saveConfig(config);
     }
   } else if (!bothAlreadySetUp) {
-    const addTg = await ask(q('Add Telegram too? (y/n)') + ' ');
-    if ((addTg || '').toLowerCase().startsWith('y')) {
-      const telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), env.TELEGRAM_BOT_TOKEN || '');
-      if (telegramToken) {
-        env.TELEGRAM_BOT_TOKEN = telegramToken;
-        writeFileSync(envPath, stringifyEnv(env), 'utf8');
-        console.log(C.dim + '  ✓ Telegram token saved.' + C.reset);
+    // WhatsApp first (or only Telegram exists and we're offering WhatsApp)
+    if (onlyTelegramSetUp) {
+      const addWa = await ask(q('Add WhatsApp? (y/n)') + ' ');
+      if ((addWa || '').toLowerCase().startsWith('y')) {
+        console.log('');
+        console.log('  Linking WhatsApp — a QR code or pairing prompt will appear.');
+        console.log('');
+        const authResult = spawnSync(process.execPath, [join(ROOT, 'index.js'), '--auth-only'], {
+          cwd: ROOT,
+          stdio: 'inherit',
+          shell: false,
+          env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' },
+        });
+        if (authResult.status !== 0) {
+          console.log(C.dim + '  WhatsApp linking failed or skipped. You can run: cowcode auth' + C.reset);
+        }
+      } else {
+        telegramOnly = true;
         const config = loadConfig() || {};
         config.channels = config.channels || {};
-        config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
+        config.channels.whatsapp = { enabled: false };
+        if (!config.channels.telegram) config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
         saveConfig(config);
+      }
+    } else {
+      const addTg = await ask(q('Add Telegram too? (y/n)') + ' ');
+      if ((addTg || '').toLowerCase().startsWith('y')) {
+        const telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), env.TELEGRAM_BOT_TOKEN || '');
+        if (telegramToken) {
+          env.TELEGRAM_BOT_TOKEN = telegramToken;
+          writeFileSync(envPath, stringifyEnv(env), 'utf8');
+          console.log(C.dim + '  ✓ Telegram token saved.' + C.reset);
+          const config = loadConfig() || {};
+          config.channels = config.channels || {};
+          config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
+          saveConfig(config);
+        }
       }
     }
   }
