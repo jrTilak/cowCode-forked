@@ -469,35 +469,46 @@ async function main() {
 
   await onboarding();
 
-  section('Messaging');
-  let messagingFirst = 'whatsapp';
-  let telegramOnly = false;
-  try {
-    const select = (await import('@inquirer/select')).default;
-    const choice = await select({
-      message: q('Which do you want to set up first?'),
-      choices: [
-        { name: 'WhatsApp (link your phone)', value: 'whatsapp' },
-        { name: 'Telegram (bot token from @BotFather)', value: 'telegram' },
-      ],
-    });
-    messagingFirst = choice;
-  } catch (err) {
-    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
-      const answer = await ask(q('Which first?') + ' (1=WhatsApp 2=Telegram, q to quit): ');
-      checkQuit(answer);
-      messagingFirst = (answer || '1').trim() === '2' ? 'telegram' : 'whatsapp';
-    } else {
-      throw err;
-    }
-  }
-
+  // Skip messaging setup if both WhatsApp and Telegram are already in the system (only re-link via cowcode auth / token edit).
+  const authDir = getAuthDir();
+  const hasWhatsAppAuth = existsSync(authDir) && existsSync(join(authDir, 'creds.json'));
   const envPath = getEnvPath();
   const hasEnv = existsSync(envPath);
   const envContent = hasEnv ? readFileSync(envPath, 'utf8') : '';
   let env = parseEnv(envContent);
+  const hasTelegramToken = !!(env.TELEGRAM_BOT_TOKEN || '').trim();
+  const configForChannels = loadConfig() || {};
+  const channels = configForChannels.channels || {};
+  const whatsappDisabled = channels.whatsapp?.enabled === false;
+  const bothAlreadySetUp = hasWhatsAppAuth && hasTelegramToken && !whatsappDisabled;
 
-  if (messagingFirst === 'telegram') {
+  let messagingFirst = 'whatsapp';
+  let telegramOnly = false;
+
+  if (!bothAlreadySetUp) {
+    section('Messaging');
+    try {
+      const select = (await import('@inquirer/select')).default;
+      const choice = await select({
+        message: q('Which do you want to set up first?'),
+        choices: [
+          { name: 'WhatsApp (link your phone)', value: 'whatsapp' },
+          { name: 'Telegram (bot token from @BotFather)', value: 'telegram' },
+        ],
+      });
+      messagingFirst = choice;
+    } catch (err) {
+      if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+        const answer = await ask(q('Which first?') + ' (1=WhatsApp 2=Telegram, q to quit): ');
+        checkQuit(answer);
+        messagingFirst = (answer || '1').trim() === '2' ? 'telegram' : 'whatsapp';
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (!bothAlreadySetUp && messagingFirst === 'telegram') {
     const telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), env.TELEGRAM_BOT_TOKEN || '');
     if (telegramToken) {
       env.TELEGRAM_BOT_TOKEN = telegramToken;
@@ -530,7 +541,7 @@ async function main() {
       if (!config.channels.telegram) config.channels.telegram = { enabled: true, botToken: 'TELEGRAM_BOT_TOKEN' };
       saveConfig(config);
     }
-  } else {
+  } else if (!bothAlreadySetUp) {
     const addTg = await ask(q('Add Telegram too? (y/n)') + ' ');
     if ((addTg || '').toLowerCase().startsWith('y')) {
       const telegramToken = await promptSecret(q('Telegram bot token (from @BotFather)'), env.TELEGRAM_BOT_TOKEN || '');
