@@ -237,6 +237,43 @@ function ensureInstall() {
   }
 }
 
+/** On first install, ask four bio questions and save as config.bio (separate from system prompt). */
+async function askBioAndSave() {
+  ensureConfig();
+  const config = loadConfig();
+  const bio = config?.bio;
+  const hasBio =
+    bio &&
+    typeof bio.userName === 'string' &&
+    typeof bio.assistantName === 'string' &&
+    typeof bio.whoAmI === 'string' &&
+    typeof bio.whoAreYou === 'string';
+  if (hasBio) return;
+
+  section('About you and your assistant');
+  console.log('  Answer these so the assistant can personalize replies.');
+  console.log('');
+
+  const userName = await ask(q('What is my name?') + ' ');
+  checkQuit(userName);
+  const assistantName = await ask(q('What is your name?') + ' ');
+  checkQuit(assistantName);
+  const whoAmI = await ask(q('Who am I?') + ' ');
+  checkQuit(whoAmI);
+  const whoAreYou = await ask(q('Who are you?') + ' ');
+  checkQuit(whoAreYou);
+
+  config.bio = {
+    userName: (userName || '').trim() || 'User',
+    assistantName: (assistantName || '').trim() || 'CowCode',
+    whoAmI: (whoAmI || '').trim() || '',
+    whoAreYou: (whoAreYou || '').trim() || '',
+  };
+  saveConfig(config);
+  console.log('');
+  console.log(C.dim + '  ✓ Bio saved to config.' + C.reset);
+}
+
 function loadConfig() {
   if (!existsSync(getConfigPath())) return null;
   try {
@@ -533,6 +570,7 @@ async function main() {
   welcome();
   migrateFromRoot();
   ensureInstall();
+  await askBioAndSave();
   ensureAgentsDefaultsFromHost();
 
   await onboarding();

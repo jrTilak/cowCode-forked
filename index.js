@@ -382,12 +382,33 @@ async function main() {
     ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
     : '';
 
+  function getBioFromConfig() {
+    try {
+      const raw = readFileSync(getConfigPath(), 'utf8');
+      const full = JSON.parse(raw);
+      return full.bio || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function buildSystemPrompt() {
     const timeCtx = getSchedulingTimeContext();
     const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
+    let bioBlock = '';
+    const bio = getBioFromConfig();
+    if (bio && (bio.userName || bio.assistantName || bio.whoAmI || bio.whoAreYou)) {
+      const parts = [];
+      if (bio.userName) parts.push(`The user's name is ${bio.userName}.`);
+      if (bio.assistantName) parts.push(`Your name is ${bio.assistantName}.`);
+      if (bio.whoAmI) parts.push(`The user describes themselves: ${bio.whoAmI}.`);
+      if (bio.whoAreYou) parts.push(`You describe yourself: ${bio.whoAreYou}.`);
+      if (parts.length) bioBlock = '\n\n' + parts.join(' ');
+    }
+    const base = chatSystemPrompt + bioBlock;
     return useTools
-      ? chatSystemPrompt + timeBlock + skillDocsBlock
-      : chatSystemPrompt + `\n\n${timeCtx.timeContextLine}`;
+      ? base + timeBlock + skillDocsBlock
+      : base + `\n\n${timeCtx.timeContextLine}`;
   }
 
   async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef) {
