@@ -32,7 +32,7 @@
     ]
   },
   "skills": {
-    "enabled": ["cron", "search"],
+    "enabled": ["cron", "search", "browse", "vision", "memory"],
     "cron": {},
     "search": {
       "provider": "brave",

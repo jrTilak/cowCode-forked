@@ -94,7 +94,7 @@ Get latest version anytime:
 cowcode update
 ```
 
-Your config stays safe.
+Your config, auth, and skills stay safe. No fresh install needed. New default skills (e.g. browse, vision, memory) are added automatically on next start. If you use a text-only LLM and want image reading, re-run setup to configure the vision fallback.
 
 ---
 
@@ -151,8 +151,10 @@ cowcode moo start
 * search for AI trends
 * summarize my notes
 * list my reminders
+* open https://example.com and tell me what’s there
+* go to that URL, click the button, and screenshot the page
 
-Cron and search are enabled.
+**Search** finds info (text in, text out). **Browse** controls a local headless browser: navigate URLs, click, scroll, fill forms, take screenshots. **Vision** reads images: when you send a photo in chat, when the agent has an image path (e.g. from a browse screenshot), or from the **live webcam** ("Show me what you see" → describes the room). Built-in chaining: screenshot → vision → act (no need to say "describe this then click"). Cron, search, browse, and vision are enabled by default.
 
 ---
 
@@ -171,6 +173,8 @@ File:
 ```
 ~/.cowcode/config.json
 ```
+
+During setup you choose a **cloud LLM** (OpenAI, Grok, or Anthropic) and a **model version** (e.g. GPT-4o, Claude 3.5 Sonnet). The installer offers recommended/latest options per provider.
 
 Local models are tried first.
 
@@ -194,17 +198,9 @@ Stored locally:
 
 # 🧠 Memory (Optional)
 
-Add notes in:
+**Chat history baked in** — "Remember what we said yesterday?" pulls from logs. **Auto-indexing** — every message you send gets embedded; no manual "moo index."
 
-```
-~/.cowcode/workspace/
-```
-
-Ask:
-
-what did I note about the project?
-
-The bot searches your files.
+Add notes in `~/.cowcode/workspace/` (e.g. `MEMORY.md`, `memory/*.md`). Conversations are stored in `workspace/chat-log/` and indexed automatically. Ask: *what did I note about the project?* or *what did we decide yesterday?* — the bot searches both notes and chat history.
 
 ---
 

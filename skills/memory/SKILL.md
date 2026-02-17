@@ -1,13 +1,17 @@
 # Memory
 
-Semantic search and read over your notes in `MEMORY.md` and `memory/*.md` (e.g. `memory/2025-02-15.md`).
+Semantic search over your **notes** (`MEMORY.md`, `memory/*.md`) and **chat history** (every conversation is automatically indexed). "Remember what we said yesterday?" pulls from logs—no manual step.
+
+**Chat history baked in** — Not just files. Conversations are stored in `workspace/chat-log/YYYY-MM-DD.jsonl` and embedded so memory_search finds them. Use memory_search for queries like "what did we decide about X?", "what did I ask yesterday?", "remember when we talked about Y?"
+
+**Auto-indexing** — Every message you send gets embedded and added to the index. No manual "moo index" or sync needed. File-based notes (MEMORY.md, memory/*.md) are synced when you run memory_search or on watch; chat is indexed as you talk.
 
 ## Tools (pass `tool` in arguments: "memory_search" or "memory_get")
 
-- **memory_search** — Set `tool: "memory_search"`, `query` (required). Optional: `maxResults`, `minScore`. Semantically search for prior work, decisions, preferences, or todos. Returns snippets with path and line range.
-- **memory_get** — Set `tool: "memory_get"`, `path` (required, from memory_search). Optional: `from`, `lines`. Read a snippet by path and optional line range.
+- **memory_search** — Set `tool: "memory_search"`, `query` (required). Optional: `maxResults`, `minScore`. Semantically search notes and chat history. Returns snippets with path and line range (paths may be `MEMORY.md`, `memory/2025-02-15.md`, or `chat-log/2025-02-16.jsonl`).
+- **memory_get** — Set `tool: "memory_get"`, `path` (required, from memory_search). Optional: `from`, `lines`. Read a snippet by path (including chat-log/*.jsonl for past conversations).
 
 ## Config
 
 - Add `"memory"` to `skills.enabled`. Set an embedding API key (e.g. OpenAI) in .env; if omitted, the first LLM model's key is used.
-- Workspace: `~/.cowcode/workspace/`. Create `MEMORY.md` and optionally `memory/*.md`.
+- Workspace: `~/.cowcode/workspace/`. Create `MEMORY.md` and optionally `memory/*.md`. Chat logs live in `workspace/chat-log/` and are created automatically.

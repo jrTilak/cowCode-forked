@@ -60,6 +60,26 @@ async function promptWithDefault(prompt, defaultVal) {
   return answer || defaultVal || '';
 }
 
+/** Select one of the model choices; returns the value (API model id). */
+async function selectModel(message, choices) {
+  if (!Array.isArray(choices) || choices.length === 0) return '';
+  try {
+    const select = (await import('@inquirer/select')).default;
+    return await select({ message, choices });
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+      const line = choices.map((c, i) => `${i + 1}. ${c.name}`).join('\n  ');
+      const answer = await ask(`${message}\n  ${line}\n  Number or name (q to quit): `);
+      checkQuit(answer);
+      const n = parseInt(answer, 10);
+      if (n >= 1 && n <= choices.length) return choices[n - 1].value;
+      const byName = choices.find((c) => c.name.toLowerCase().includes((answer || '').toLowerCase()));
+      return byName ? byName.value : choices[0].value;
+    }
+    throw err;
+  }
+}
+
 /** Mask a secret for display: e.g. "sk-proj-Qx4ue..." -> "sk-proj-Qx***" */
 function maskSecret(val) {
   if (!val || typeof val !== 'string') return '';
@@ -76,6 +96,35 @@ async function promptSecret(prompt, existingVal) {
   checkQuit(answer);
   return answer || existingVal || '';
 }
+
+/**
+ * Cloud LLM provider → list of model choices for setup.
+ * Value is the API model id. First option per provider is the recommended/latest.
+ */
+const CLOUD_LLM_MODELS = {
+  openai: [
+    { name: 'GPT-4o (recommended)', value: 'gpt-4o' },
+    { name: 'GPT-4o mini', value: 'gpt-4o-mini' },
+    { name: 'GPT-4 Turbo', value: 'gpt-4-turbo' },
+    { name: 'GPT-4', value: 'gpt-4' },
+  ],
+  grok: [
+    { name: 'Grok 2 (recommended)', value: 'grok-2' },
+    { name: 'Grok 2 mini', value: 'grok-2-mini' },
+  ],
+  anthropic: [
+    { name: 'Claude 3.5 Sonnet (recommended)', value: 'claude-3-5-sonnet-20241022' },
+    { name: 'Claude 3.5 Haiku', value: 'claude-3-5-haiku-20241022' },
+    { name: 'Claude 3 Opus', value: 'claude-3-opus-20240229' },
+  ],
+};
+
+/** Vision fallback: used only when the agent model is text-only (e.g. Llama, GPT-3.5). Same keys as main LLM. */
+const VISION_FALLBACK_CHOICES = [
+  { name: 'Skip (use only if your main model supports vision)', value: 'skip' },
+  { name: 'OpenAI GPT-4o (vision)', value: 'openai' },
+  { name: 'Anthropic Claude (vision)', value: 'anthropic' },
+];
 
 /** Returns first available package manager: pnpm, npm, or yarn. */
 function getPackageManager() {
@@ -211,8 +260,39 @@ function stringifyEnv(obj) {
     .join('\n');
 }
 
+function ensureConfig() {
+  let config = loadConfig();
+  if (!config) {
+    const rootConfig = join(ROOT, 'config.json');
+    if (existsSync(rootConfig)) {
+      try {
+        config = JSON.parse(readFileSync(rootConfig, 'utf8'));
+        ensureStateDir();
+        saveConfig(config);
+      } catch {
+        config = {};
+      }
+    }
+    if (!config || !config.llm) {
+      config = config || {};
+      config.llm = config.llm || {
+        maxTokens: 2048,
+        models: [
+          { provider: 'lmstudio', baseUrl: 'http://127.0.0.1:1234/v1', model: 'local', apiKey: 'not-needed' },
+          { provider: 'openai', apiKey: 'LLM_1_API_KEY' },
+          { provider: 'grok', apiKey: 'LLM_2_API_KEY' },
+          { provider: 'anthropic', apiKey: 'LLM_3_API_KEY' },
+        ],
+      };
+      ensureStateDir();
+      saveConfig(config);
+    }
+  }
+  return config;
+}
+
 async function onboarding() {
-  const config = loadConfig();
+  let config = ensureConfig();
   const defaultBaseUrl = getDefaultBaseUrl(config);
   const envPath = getEnvPath();
   const hasEnv = existsSync(envPath);
@@ -254,15 +334,54 @@ async function onboarding() {
     console.log('Quit.');
     process.exit(0);
   }
+  let selectedModel = '';
   if (provider === 'openai') {
     llm1Key = await promptSecret(q('OpenAI API key'), env.LLM_1_API_KEY || '');
+    const models = CLOUD_LLM_MODELS.openai;
+    selectedModel = await selectModel(q('OpenAI model version'), models);
   } else if (provider === 'grok') {
     llm2Key = await promptSecret(q('Grok API key'), env.LLM_2_API_KEY || '');
+    const models = CLOUD_LLM_MODELS.grok;
+    selectedModel = await selectModel(q('Grok model version'), models);
   } else if (provider === 'anthropic') {
     llm3Key = await promptSecret(q('Anthropic API key'), env.LLM_3_API_KEY || '');
+    const models = CLOUD_LLM_MODELS.anthropic;
+    selectedModel = await selectModel(q('Anthropic (Claude) model version'), models);
   }
 
   const braveKey = await promptSecret(q('Brave Search API key – optional'), env.BRAVE_API_KEY || '');
+
+  // Vision fallback: for image reading when the main agent model is text-only. Set at setup; no mid-run prompts.
+  let visionFallbackProvider = 'skip';
+  try {
+    const select = (await import('@inquirer/select')).default;
+    visionFallbackProvider = await select({
+      message: q('Vision fallback for image reading? (when your main model is text-only)'),
+      choices: VISION_FALLBACK_CHOICES,
+    });
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.message?.includes('@inquirer/select')) {
+      const answer = await ask(q('Vision fallback?') + ' (skip / openai / anthropic, q to quit): ');
+      checkQuit(answer);
+      visionFallbackProvider = (answer || '').trim().toLowerCase() || 'skip';
+    } else {
+      throw err;
+    }
+  }
+  if (visionFallbackProvider === 'openai' || visionFallbackProvider === 'anthropic') {
+    config = loadConfig() || config;
+    if (!config.skills) config.skills = {};
+    if (!config.skills.vision) config.skills.vision = {};
+    const visionModel = visionFallbackProvider === 'openai'
+      ? await selectModel(q('OpenAI vision model'), CLOUD_LLM_MODELS.openai)
+      : await selectModel(q('Anthropic vision model'), CLOUD_LLM_MODELS.anthropic);
+    config.skills.vision.fallback = {
+      provider: visionFallbackProvider,
+      model: visionModel || (visionFallbackProvider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022'),
+      apiKey: visionFallbackProvider === 'openai' ? 'LLM_1_API_KEY' : 'LLM_3_API_KEY',
+    };
+    saveConfig(config);
+  }
 
   if (baseUrl && config?.llm?.models?.[0]) {
     config.llm.models[0].baseUrl = baseUrl;
@@ -277,8 +396,7 @@ async function onboarding() {
 
   writeFileSync(getEnvPath(), stringifyEnv(newEnv), 'utf8');
 
-  // When user adds a cloud LLM key during setup, set that model as priority — but only if no model
-  // has priority yet (so we never overwrite a choice the user made later in config).
+  // When user adds a cloud LLM key during setup, set that model as priority and chosen version.
   const cloudKeyAdded = provider !== 'skip' && (
     (provider === 'openai' && (llm1Key ?? '').trim()) ||
     (provider === 'grok' && (llm2Key ?? '').trim()) ||
@@ -292,9 +410,20 @@ async function onboarding() {
     if (!hasPriorityAlready) {
       for (let i = 0; i < models.length; i++) {
         const p = (models[i].provider || '').toLowerCase();
-        models[i].priority = p === provider;
+        const isChosen = p === provider;
+        models[i].priority = isChosen;
+        if (isChosen && selectedModel) models[i].model = selectedModel;
       }
       saveConfig(config);
+    } else if (selectedModel) {
+      // Re-run setup: still update the chosen provider's model version.
+      for (let i = 0; i < models.length; i++) {
+        if ((models[i].provider || '').toLowerCase() === provider) {
+          models[i].model = selectedModel;
+          saveConfig(config);
+          break;
+        }
+      }
     }
   }
 

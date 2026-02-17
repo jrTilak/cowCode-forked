@@ -51,6 +51,22 @@ const DEFAULT_CLOUD_MODELS = {
   deepseek: 'deepseek-chat',
 };
 
+/** Parse optional vision fallback model (used when agent models are text-only). Set in setup; no mid-run prompts. */
+function parseVisionFallback(config) {
+  const entry = config.skills?.vision?.fallback || config.llm?.vision;
+  if (!entry || typeof entry !== 'object') return null;
+  const provider = entry.provider && String(entry.provider).toLowerCase();
+  const isLocal = provider && LOCAL_PROVIDERS.has(provider);
+  const baseUrl = isLocal
+    ? (fromEnv(entry.baseUrl) || entry.baseUrl || (provider && PRESETS[provider]))
+    : (entry.provider && PRESETS[provider]);
+  const apiKey = fromEnv(entry.apiKey) ?? fromEnv('LLM_API_KEY');
+  const modelRaw = entry.model != null ? fromEnv(entry.model) : undefined;
+  const model = modelRaw || (isLocal ? 'local' : fromEnv(cloudModelEnv(provider))) || fromEnv('LLM_MODEL') || (provider && DEFAULT_CLOUD_MODELS[provider]);
+  const maxTokens = Number(fromEnv(entry.maxTokens)) || 1024;
+  return { baseUrl: baseUrl || PRESETS.lmstudio, apiKey: apiKey ?? 'not-needed', model: model || 'local', maxTokens };
+}
+
 function loadConfig() {
   const configPath = getConfigPath();
   let raw = '';
@@ -101,13 +117,15 @@ function loadConfig() {
       models = [priorityModel, ...models];
     }
     models = models.map(({ priority: _p, ...m }) => m);
-    return { models, maxTokens: defaultMaxTokens };
+    const visionFallback = parseVisionFallback(config);
+    return { models, maxTokens: defaultMaxTokens, visionFallback };
   }
 
   const baseUrl = fromEnv('LLM_BASE_URL') || fromEnv(llm.baseUrl);
   const apiKey = fromEnv('LLM_API_KEY') ?? fromEnv(llm.apiKey);
   const model = fromEnv('LLM_MODEL') || fromEnv(llm.model);
   const maxTokens = Number(fromEnv(llm.maxTokens)) || 2048;
+  const visionFallback = parseVisionFallback(config);
   return {
     models: [
       {
@@ -118,6 +136,7 @@ function loadConfig() {
       },
     ],
     maxTokens,
+    visionFallback,
   };
 }
 
@@ -307,6 +326,97 @@ CHAT = greetings, general knowledge questions (that don't need current data), or
   }
   if (lastError) return 'CHAT';
   throw new Error('No LLM configured');
+}
+
+/**
+ * Vision: describe or analyze an image using a vision-capable model.
+ * - If the agent's current model already supports vision (e.g. GPT-4o, Claude-3), the image is sent to it
+ *   with the same key; no extra key or switch.
+ * - If the agent is on a text-only model (e.g. GPT-3.5, Llama-3) and all agent models fail, we quietly
+ *   use the configured vision fallback (skills.vision.fallback or llm.vision) for that call only.
+ *   Configure the fallback at setup; no mid-run prompts.
+ * imageUrlOrDataUri: data URI or https URL. For file paths, convert to data URI in the caller.
+ * @returns {Promise<string>}
+ */
+export async function describeImage(imageUrlOrDataUri, prompt, systemPrompt = 'You are a helpful vision assistant. Describe or analyze the image concisely.') {
+  const urlOrData = (imageUrlOrDataUri || '').trim();
+  if (!urlOrData) throw new Error('describeImage requires image URL or data URI');
+
+  const isDataUri = /^data:image\/[^;]+;base64,/.test(urlOrData);
+  let userContentOpenAI;
+  let userContentAnthropic;
+
+  if (isDataUri) {
+    const match = urlOrData.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    const mediaType = (match && match[1]) || 'image/jpeg';
+    const base64 = (match && match[2]) || '';
+    userContentOpenAI = [
+      { type: 'text', text: prompt || 'What is in this image?' },
+      { type: 'image_url', image_url: { url: urlOrData } },
+    ];
+    userContentAnthropic = [
+      { type: 'text', text: prompt || 'What is in this image?' },
+      { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+    ];
+  } else {
+    userContentOpenAI = [
+      { type: 'text', text: prompt || 'What is in this image?' },
+      { type: 'image_url', image_url: { url: urlOrData } },
+    ];
+    userContentAnthropic = null;
+  }
+
+  const messages = [{ role: 'user', content: userContentOpenAI }];
+  const { models, visionFallback } = loadConfig();
+  const candidates = visionFallback ? [...models, visionFallback] : [...models];
+  let lastError;
+  for (const opts of candidates) {
+    const label = opts.model || opts.baseUrl?.replace(/^https?:\/\//, '').slice(0, 20) || 'unknown';
+    const isAnthropic = (opts.baseUrl || '').includes('anthropic.com');
+    try {
+      let res;
+      if (isAnthropic && userContentAnthropic) {
+        const body = {
+          model: opts.model,
+          max_tokens: opts.maxTokens || 1024,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContentAnthropic }],
+        };
+        res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': opts.apiKey || '',
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify(body),
+        });
+      } else if (!isAnthropic) {
+        const fullMessages = systemPrompt ? [{ role: 'system', content: systemPrompt }, ...messages] : messages;
+        res = await callOne(fullMessages, opts, null);
+      } else {
+        continue;
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Vision request failed ${res.status}: ${text.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      const text = data.content?.[0]?.text ?? data.choices?.[0]?.message?.content ?? '';
+      if (text) {
+        console.log('[LLM] vision used:', label);
+        return String(text).trim();
+      }
+      throw new Error('No content in vision response');
+    } catch (err) {
+      const msg = (err && err.message) || '';
+      const looksLikeTextOnly = /invalid.*content|does not support|400|image|vision|multimodal/i.test(msg);
+      console.log('[LLM] vision try failed:', label, err.message);
+      lastError = err;
+      if (looksLikeTextOnly) continue;
+    }
+  }
+  throw lastError || new Error('No vision-capable LLM responded');
 }
 
 export { loadConfig, PRESETS };

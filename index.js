@@ -3,7 +3,7 @@
  * Config and state live in ~/.cowcode (or COWCODE_STATE_DIR).
  */
 
-import { getAuthDir, getCronStorePath, getConfigPath, getEnvPath, ensureStateDir, getWorkspaceDir } from './lib/paths.js';
+import { getAuthDir, getCronStorePath, getConfigPath, getEnvPath, ensureStateDir, getWorkspaceDir, getUploadsDir } from './lib/paths.js';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: getEnvPath() });
@@ -19,6 +19,7 @@ const {
   isJidBroadcast,
   extractMessageContent,
   areJidsSameUser,
+  downloadMediaMessage,
 } = Baileys;
 import { chat as llmChat, chatWithTools, loadConfig } from './llm.js';
 import { runAgentTurn, stripThinking } from './lib/agent.js';
@@ -27,10 +28,13 @@ import { fileURLToPath } from 'url';
 import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
-import { getSkillsEnabled, getSkillContext } from './skills/loader.js';
+import { getSkillsEnabled, getSkillContext, DEFAULT_ENABLED } from './skills/loader.js';
 import { initBot, createTelegramSock, isTelegramChatId } from './lib/telegram.js';
+import { addPending as addPendingTelegram, flushPending as flushPendingTelegram } from './lib/pending-telegram.js';
 import { getChannelsConfig } from './lib/channels-config.js';
 import { getSchedulingTimeContext } from './lib/timezone.js';
+import { getMemoryConfig } from './lib/memory-config.js';
+import { indexChatExchange } from './lib/memory-index.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -62,6 +66,42 @@ const DISCONNECT_REASONS = {
 };
 
 const RESTART_REQUIRED_CODE = 515;
+
+/** Codes for which we do not retry reconnect (user must re-auth). */
+const NO_RETRY_CODES = new Set([401, 403]);
+
+const RECONNECT_DELAYS_MS = [5000, 15000, 30000, 60000]; // exponential backoff, max 60s
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Create WhatsApp socket with saved auth; resolves when connection is open, rejects if closed before open.
+ * @returns {Promise<ReturnType<makeWASocket>>}
+ */
+async function connectWhatsApp() {
+  const { version } = await fetchLatestBaileysVersion();
+  const { state, saveCreds } = await useMultiFileAuthState(getAuthDir());
+  const sock = makeWASocket({
+    version,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+    },
+    logger,
+  });
+  sock.ev.on('creds.update', saveCreds);
+  return new Promise((resolve, reject) => {
+    sock.ev.on('connection.update', (u) => {
+      if (u.connection === 'open') resolve(sock);
+      if (u.connection === 'close' && u.lastDisconnect) {
+        const code = u.lastDisconnect.error?.output?.statusCode ?? u.lastDisconnect.error?.statusCode;
+        reject(Object.assign(new Error('closed'), { code }));
+      }
+    });
+  });
+}
 
 /**
  * @param {{ continueToBot?: boolean }} opts - If true, after link we continue to run the bot (no exit).
@@ -127,18 +167,23 @@ async function runAuthOnly(opts = {}) {
   });
 }
 
-/** One-time migration: add "memory" to skills.enabled if missing so updates get the new default. */
-function migrateSkillsConfigToIncludeMemory() {
+/** Migration: ensure all default skills (cron, search, browse, vision, memory) are in skills.enabled so new installs and updates get them without fresh install. */
+function migrateSkillsConfigToIncludeDefaults() {
   try {
     const path = getConfigPath();
     if (!existsSync(path)) return;
     const raw = readFileSync(path, 'utf8');
     const config = JSON.parse(raw);
-    const skills = config.skills;
-    if (!skills || typeof skills !== 'object') return;
-    const enabled = Array.isArray(skills.enabled) ? skills.enabled : [];
-    if (enabled.includes('memory')) return;
-    enabled.push('memory');
+    const skills = config.skills || {};
+    let enabled = Array.isArray(skills.enabled) ? skills.enabled : [];
+    let changed = false;
+    for (const id of DEFAULT_ENABLED) {
+      if (!enabled.includes(id)) {
+        enabled = [...enabled, id];
+        changed = true;
+      }
+    }
+    if (!changed) return;
     config.skills = { ...skills, enabled };
     writeFileSync(path, JSON.stringify(config, null, 2), 'utf8');
   } catch (_) {}
@@ -146,7 +191,7 @@ function migrateSkillsConfigToIncludeMemory() {
 
 async function main() {
   ensureStateDir();
-  migrateSkillsConfigToIncludeMemory();
+  migrateSkillsConfigToIncludeDefaults();
   if (authOnly && existsSync(getAuthDir())) {
     rmSync(getAuthDir(), { recursive: true });
     mkdirSync(getAuthDir(), { recursive: true });
@@ -205,17 +250,7 @@ async function main() {
       }
     }
   } else {
-    const { version } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(getAuthDir());
-    sock = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
-      },
-      logger,
-    });
-    sock.ev.on('creds.update', saveCreds);
+    sock = null; // will be set by connectWhatsApp() in the reconnect loop below
   }
 
   const config = loadConfig();
@@ -230,6 +265,9 @@ async function main() {
   const MAX_REPLIED_IDS = 500;
   const MAX_OUR_SENT_IDS = 200;
   const MAX_CHAT_HISTORY_EXCHANGES = 5;
+
+  /** Pending WhatsApp replies when send failed (e.g. disconnected); flushed when connection reopens. */
+  const pendingReplies = [];
 
   /** Last N exchanges (user + assistant) per jid for LLM context. Step 1: chat + history + tools. */
   const chatHistoryByJid = new Map();
@@ -257,7 +295,7 @@ async function main() {
   const toolsToUse = useSkills ? allTools : [];
   const useTools = toolsToUse.length > 0;
   const CLARIFICATION_RULE = 'When information is missing or unclear (e.g. time, message, which option), or when a tool returns an error, do NOT show the error to the user. Instead reply with a short, friendly question asking for the missing or unclear detail (e.g. "Did you mean tomorrow at 9 or next week?", "What message should I send you?"). Keep the conversation going until you have everything needed—no silent failures, no raw errors.';
-  const chatSystemPrompt = `You are CowCode. A helpful assistant. Answer in the language the user asked in. Pull fresh data from the search skill for unknown or time-bound data. Do not invent things. Do not use <think> or any thinking/reasoning blocks—output only your final reply.`;
+  const chatSystemPrompt = `You are CowCode. A helpful assistant. Answer in the language the user asked in. Use the search skill for finding info (queries, news, weather). Use the browse skill when the user wants to open a URL, interact with a page (click, scroll, fill forms), or get a screenshot—local browser control, no cloud. Use the vision skill when the user sends an image, when you have an image path (e.g. from a browse screenshot), or when they want the live camera ("Show me what you see"—use image: \"webcam\"). Built-in chaining: after a browse screenshot, use that path with vision to describe, then click/fill/scroll as needed; no need for the user to say "describe this then click." Use the memory skill to search notes and chat history (e.g. \"Remember what we said yesterday?\"—chat is auto-indexed, no manual sync). Do not invent things. Do not use <think> or any thinking/reasoning blocks—output only your final reply.`;
   const skillDocsBlock = skillDocs
     ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
     : '';
@@ -290,17 +328,33 @@ async function main() {
       historyMessages: getLast5Exchanges(jid),
     });
     const textForSend = isTelegramChatId(jid) ? textToSend.replace(/^\[CowCode\]\s*/i, '').trim() : textToSend;
-    const sent = await sock.sendMessage(jid, { text: textForSend });
-    if (sent?.key?.id && ourSentIdsRef?.current) {
-      ourSentIdsRef.current.add(sent.key.id);
-      if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
-        const first = ourSentIdsRef.current.values().next().value;
-        if (first) ourSentIdsRef.current.delete(first);
+    try {
+      const sent = await sock.sendMessage(jid, { text: textForSend });
+      if (sent?.key?.id && ourSentIdsRef?.current) {
+        ourSentIdsRef.current.add(sent.key.id);
+        if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
+          const first = ourSentIdsRef.current.values().next().value;
+          if (first) ourSentIdsRef.current.delete(first);
+        }
+      }
+      lastSentByJidMap.set(jid, textForSend);
+      pushExchange(jid, text, textForSend);
+      const memoryConfig = getMemoryConfig();
+      if (memoryConfig) {
+        indexChatExchange(memoryConfig, { user: text, assistant: textForSend, timestampMs: Date.now(), jid }).catch((err) =>
+          console.error('[memory] auto-index failed:', err.message)
+        );
+      }
+      console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
+    } catch (sendErr) {
+      if (!isTelegramChatId(jid)) {
+        pendingReplies.push({ jid, text: textForSend });
+        console.log('[replied] queued (send failed, will retry after reconnect):', sendErr.message);
+      } else {
+        addPendingTelegram(jid, textForSend);
+        console.log('[replied] Telegram queued (send failed, will retry on next message):', sendErr.message);
       }
     }
-    lastSentByJidMap.set(jid, textForSend);
-    pushExchange(jid, text, textForSend);
-    console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
   }
 
   // --test: run main code path once with mock socket (set above), then exit. No WhatsApp auth.
@@ -350,6 +404,7 @@ async function main() {
         if (chatId == null || !text) return;
         if (msg.from?.is_bot) return;
         if (text.startsWith('[CowCode]')) return;
+        await flushPendingTelegram(chatId, optsTelegramBot);
         const msgKey = `tg:${chatId}:${msg.message_id}`;
         if (telegramRepliedIds.has(msgKey)) return;
         telegramRepliedIds.add(msgKey);
@@ -361,7 +416,8 @@ async function main() {
         const jidKey = String(chatId);
         runAgentWithSkills(sock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }).catch((err) => {
           console.error('Telegram agent error:', err.message);
-          optsTelegramBot.sendMessage(chatId, `Moo — something went wrong: ${err.message}`).catch(() => {});
+          const errorText = `Moo — something went wrong: ${err.message}`;
+          optsTelegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
         });
       });
       return;
@@ -393,6 +449,11 @@ async function main() {
       if (sid) {
         startCron({ sock, selfJid: sid, storePath: getCronStorePath(), telegramBot: telegramBot || undefined });
       }
+      // Flush replies that failed to send while disconnected
+      while (pendingReplies.length > 0) {
+        const { jid, text } = pendingReplies.shift();
+        sock.sendMessage(jid, { text }).catch((e) => console.error('[pending] send failed:', e.message));
+      }
     }
     if (u.connection === 'close') {
       stopCron();
@@ -405,6 +466,7 @@ async function main() {
       if (code === 401 || code === 403 || code === 428) {
         console.log('  → Run: pnpm run auth   to re-link your device.');
       }
+      if (typeof opts.onDisconnect === 'function') opts.onDisconnect(code);
     }
   });
 
@@ -428,15 +490,30 @@ async function main() {
       if (!selfJid || !areJidsSameUser(jid, selfJid)) continue;
 
       const content = extractMessageContent(m.message);
-      const text = (content?.conversation || content?.extendedTextMessage?.text || '').trim();
-      if (!text) continue;
+      let userText = (content?.conversation || content?.extendedTextMessage?.text || '').trim();
+      if (!userText && content?.imageMessage) {
+        try {
+          const buf = await downloadMediaMessage(m, 'buffer', {});
+          const uploadsDir = getUploadsDir();
+          if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+          const msgId = m.key?.id || Date.now();
+          const imagePath = join(uploadsDir, `image-${msgId}.jpg`);
+          writeFileSync(imagePath, buf);
+          const caption = (content.imageMessage.caption || '').trim();
+          userText = `User sent an image. Image file: ${imagePath}. ${caption ? 'Caption: ' + caption : "What's in this image?"}`;
+        } catch (err) {
+          console.error('[image] download failed:', err.message);
+          continue;
+        }
+      }
+      if (!userText) continue;
 
       // Do not treat our own CowCode replies as user input.
-      if (text.startsWith('[CowCode]')) continue;
+      if (userText.startsWith('[CowCode]')) continue;
 
       // Skip only when this is clearly our echo: fromMe and the text exactly matches what we last sent to this chat.
       const lastWeSent = lastSentByJid.get(jid);
-      if (m.key.fromMe && typeof lastWeSent === 'string' && text === lastWeSent) {
+      if (m.key.fromMe && typeof lastWeSent === 'string' && userText === lastWeSent) {
         console.log('[skip] our echo (fromMe, text matches last sent)');
         continue;
       }
@@ -454,7 +531,7 @@ async function main() {
         }
       }
 
-      console.log('[incoming]', text.slice(0, 60) + (text.length > 60 ? '…' : ''));
+      console.log('[incoming]', userText.slice(0, 60) + (userText.length > 60 ? '…' : ''));
       try {
         if (m.key.id) {
           try {
@@ -462,13 +539,21 @@ async function main() {
           } catch (_) {}
         }
 
-        runAgentWithSkills(sock, jid, text, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }).catch((err) => {
+        runAgentWithSkills(sock, jid, userText, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }).catch((err) => {
           console.error('Background agent error:', err.message);
-          sock.sendMessage(jid, { text: `[CowCode] Moo — something went wrong: ${err.message}` }).catch(() => {});
+          const errorText = `[CowCode] Moo — something went wrong: ${err.message}`;
+          sock.sendMessage(jid, { text: errorText }).catch(() => {
+            pendingReplies.push({ jid, text: errorText });
+          });
         });
       } catch (err) {
         console.error('LLM error:', err.message);
-        await sock.sendMessage(jid, { text: `[CowCode] Moo — something went wrong: ${err.message}` });
+        const errorText = `[CowCode] Moo — something went wrong: ${err.message}`;
+        try {
+          await sock.sendMessage(jid, { text: errorText });
+        } catch (_) {
+          pendingReplies.push({ jid, text: errorText });
+        }
       }
     }
   });
@@ -478,10 +563,31 @@ async function main() {
     const MAX_TELEGRAM_REPLIED = 500;
     telegramBot.on('message', async (msg) => {
       const chatId = msg.chat?.id;
-      const text = (msg.text || '').trim();
-      if (chatId == null || !text) return;
+      let text = (msg.text || '').trim();
+      if (chatId == null) return;
+      if (!text && msg.photo && msg.photo.length > 0) {
+        try {
+          const photo = msg.photo[msg.photo.length - 1];
+          const file = await telegramBot.getFile(photo.file_id);
+          const token = getChannelsConfig().telegram.botToken;
+          const downloadUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+          const res = await fetch(downloadUrl);
+          const buf = Buffer.from(await res.arrayBuffer());
+          const uploadsDir = getUploadsDir();
+          if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+          const imagePath = join(uploadsDir, `tg-${chatId}-${msg.message_id}.jpg`);
+          writeFileSync(imagePath, buf);
+          const caption = (msg.caption || '').trim();
+          text = `User sent an image. Image file: ${imagePath}. ${caption ? 'Caption: ' + caption : "What's in this image?"}`;
+        } catch (err) {
+          console.error('[telegram] image download failed:', err.message);
+          return;
+        }
+      }
+      if (!text) return;
       if (msg.from?.is_bot) return;
       if (text.startsWith('[CowCode]')) return;
+      await flushPendingTelegram(chatId, telegramBot);
       const msgKey = `tg:${chatId}:${msg.message_id}`;
       if (telegramRepliedIds.has(msgKey)) return;
       telegramRepliedIds.add(msgKey);
@@ -493,13 +599,56 @@ async function main() {
       const jidKey = String(chatId);
       runAgentWithSkills(telegramSock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }).catch((err) => {
         console.error('Telegram agent error:', err.message);
-        telegramBot.sendMessage(chatId, `Moo — something went wrong: ${err.message}`).catch(() => {});
+        const errorText = `Moo — something went wrong: ${err.message}`;
+        telegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
       });
     });
   }
   }
 
-  runBot(sock);
+  // Telegram-only or test: single run, no reconnect
+  if (telegramOnlyMode || process.argv.includes('--test')) {
+    runBot(sock, {});
+    return;
+  }
+
+  // Need-auth path: single run after QR/pairing
+  if (needAuth) {
+    runBot(sock, {});
+    return;
+  }
+
+  // Normal path: connect with retry and reconnect loop
+  let reconnectAttempt = 0;
+  while (true) {
+    let s;
+    try {
+      s = await connectWhatsApp();
+    } catch (e) {
+      const code = e.code != null ? Number(e.code) : null;
+      if (code !== null && NO_RETRY_CODES.has(code)) {
+        console.log('Cannot reconnect (logged out or forbidden). Run: pnpm run auth');
+        process.exit(1);
+      }
+      const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
+      reconnectAttempt++;
+      console.log('Connection failed. Reconnecting in', Math.round(delay / 1000), 's...');
+      await sleep(delay);
+      continue;
+    }
+    reconnectAttempt = 0;
+    const disconnectPromise = new Promise((resolve) => {
+      runBot(s, { onDisconnect: (code) => resolve({ code }) });
+    });
+    const { code } = await disconnectPromise;
+    if (code !== null && code !== undefined && NO_RETRY_CODES.has(code)) {
+      console.log('Logged out or forbidden. Run: pnpm run auth');
+      break;
+    }
+    const delay = RECONNECT_DELAYS_MS[0];
+    console.log('Reconnecting in', Math.round(delay / 1000), 's...');
+    await sleep(delay);
+  }
 }
 
 main().catch((err) => {

@@ -5,11 +5,15 @@
 
 import { executeCron } from '../lib/executors/cron.js';
 import { executeBrowser } from '../lib/executors/browser.js';
+import { executeBrowse } from '../lib/executors/browse.js';
 import { executeMemory } from '../lib/executors/memory.js';
+import { executeVision } from '../lib/executors/vision.js';
 
 const EXECUTORS = {
   cron: executeCron,
   search: executeBrowser,
+  browse: executeBrowse,
+  vision: executeVision,
   memory: executeMemory,
 };
 

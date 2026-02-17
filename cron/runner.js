@@ -1,14 +1,19 @@
 /**
- * Cron runner. Schedules jobs from the store; when due, runs the same agent (tools + LLM) as chat and sends reply.
+ * Cron runner. Schedules jobs from the store; when due, runs each job in a brand-new agent session
+ * (separate process via cron/run-job.js) so the active chat bot never runs cron—only the child does.
  */
 
+import { spawn } from 'child_process';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { Cron } from 'croner';
 import { loadJobs, removeJob, updateJob } from './store.js';
 import { isTelegramChatId } from '../lib/telegram.js';
-import { getTimezoneContextLine } from '../lib/timezone.js';
+import { addPending as addPendingTelegram } from '../lib/pending-telegram.js';
 import { getCronStorePath, getWorkspaceDir } from '../lib/paths.js';
-import { getSkillContext } from '../skills/loader.js';
-import { runAgentTurn, CLARIFICATION_RULE } from '../lib/agent.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = join(__dirname, '..');
 
 /** @type {import('croner').Cron[]} */
 const scheduled = [];
@@ -23,10 +28,17 @@ let currentStorePath = null;
 
 /**
  * Send a text to jid (WhatsApp JID or Telegram chat id). Uses currentSock or currentTelegramBot.
+ * On Telegram send failure, queues in pending-telegram for flush on next user message.
  */
 async function sendCronReply(jid, text) {
   if (currentTelegramBot && isTelegramChatId(jid)) {
-    await currentTelegramBot.sendMessage(jid, text);
+    try {
+      await currentTelegramBot.sendMessage(jid, text);
+    } catch (e) {
+      addPendingTelegram(String(jid), text);
+      console.log('[cron] Telegram reply queued (send failed, will retry on next message):', e.message);
+      return;
+    }
   } else if (currentSock && typeof currentSock.sendMessage === 'function') {
     await currentSock.sendMessage(jid, { text });
   } else {
@@ -42,19 +54,9 @@ function sleep(ms) {
 }
 
 /**
- * Build system prompt for cron runs: same skills as chat so the LLM can call search, cron, memory.
- */
-function buildCronSystemPrompt(skillDocs, runSkillTool) {
-  const base = `You are CowCode. Reply concisely. Use run_skill when you need search, cron, or memory. Do not use <think> or any thinking/reasoning blocks—output only your final reply.\n\n${getTimezoneContextLine()}`;
-  const tools = Array.isArray(runSkillTool) && runSkillTool.length > 0;
-  const skillBlock = tools && skillDocs
-    ? `\n\n# Available skills (use run_skill with skill and arguments)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
-    : '';
-  return base + skillBlock;
-}
-
-/**
- * Run a single cron job: same agent as chat (LLM can call run_skill for search, cron, memory). Throws on failure.
+ * Run a single cron job in a brand-new agent session (separate process). Throws on failure.
+ * The main bot process only sends the reply; the child process runs the LLM and tools.
+ *
  * @param {Object} opts
  * @param {import('./store.js').CronJob} opts.job
  * @param {object} opts.sock - Baileys socket (used when job.jid is WhatsApp)
@@ -63,21 +65,41 @@ function buildCronSystemPrompt(skillDocs, runSkillTool) {
 async function runJobOnce({ job, sock, selfJid }) {
   const jid = job.jid || selfJid;
   if (!jid) throw new Error('No JID for job');
-  const { skillDocs, runSkillTool } = getSkillContext();
-  const toolsToUse = Array.isArray(runSkillTool) && runSkillTool.length > 0 ? runSkillTool : [];
-  const ctx = {
-    storePath: currentStorePath || getCronStorePath(),
+  const storePath = currentStorePath || getCronStorePath();
+  const payload = JSON.stringify({
+    message: job.message,
     jid,
+    storePath,
     workspaceDir: getWorkspaceDir(),
-    scheduleOneShot,
-    startCron: () => startCron({ sock: currentSock, selfJid: currentSelfJid, storePath: currentStorePath, telegramBot: currentTelegramBot }),
-  };
-  const { textToSend } = await runAgentTurn({
-    userText: job.message,
-    ctx,
-    systemPrompt: buildCronSystemPrompt(skillDocs, runSkillTool),
-    tools: toolsToUse,
-    historyMessages: [],
+  });
+  const textToSend = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['cron/run-job.js'], {
+      cwd: PROJECT_ROOT,
+      stdio: ['pipe', 'pipe', 'inherit'],
+      env: { ...process.env, COWCODE_STATE_DIR: process.env.COWCODE_STATE_DIR },
+    });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { out += chunk; });
+    child.on('exit', (code, signal) => {
+      if (code !== 0 && code != null) {
+        reject(new Error(`run-job exited with code ${code}`));
+        return;
+      }
+      if (signal) {
+        reject(new Error(`run-job killed: ${signal}`));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(out.trim());
+        if (parsed.error) reject(new Error(parsed.error));
+        else resolve(parsed.textToSend || '');
+      } catch (e) {
+        reject(new Error(out.trim() || e.message || 'run-job produced invalid output'));
+      }
+    });
+    child.on('error', reject);
+    child.stdin.end(payload, 'utf8');
   });
   const text = isTelegramChatId(jid) ? textToSend.replace(/^\[CowCode\]\s*/i, '').trim() : textToSend;
   if (text) await sendCronReply(jid, text);
