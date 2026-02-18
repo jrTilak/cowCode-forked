@@ -24,12 +24,12 @@ import { getSkillContext } from '../../skills/loader.js';
 import { chatWithTools } from '../../llm.js';
 import { executeSkill } from '../../skills/executor.js';
 import { getSchedulingTimeContext } from '../../lib/timezone.js';
+import { CLARIFICATION_RULE } from '../../lib/agent.js';
 
 const DEFAULT_MSG = 'Remind me to call Bishwas tomorrow at 5.30 p.m.';
 
 function getScheduleSystemPrompt() {
   const timeCtx = getSchedulingTimeContext();
-  const CLARIFICATION_RULE = 'When information is missing or unclear (e.g. time, message, which option), or when a tool returns an error, do NOT show the error to the user. Instead reply with a short, friendly question asking for the missing or unclear detail (e.g. "Did you mean tomorrow at 9 or next week?", "What message should I send you?"). Keep the conversation going until you have everything needed—no silent failures, no raw errors.';
   return `You are a helpful assistant with access to the cron tool for reminders. Reply concisely. Do not use <think> or any thinking/reasoning blocks—output only your final reply.
 
 CRITICAL - Choose the right action:
@@ -41,7 +41,7 @@ Current time UTC (for "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${time
 
 Important: job.message must be exactly what the user asked to receive.
 
-${CLARIFICATION_RULE} If the user says "remind me" without when or what, ask e.g. "When should I remind you, and what message would you like?"`;
+${CLARIFICATION_RULE} If the user says "remind me" with no when or what and you are truly stuck, ask e.g. "When should I remind you, and what message would you like?"`;
 }
 
 function section(title) {
@@ -53,7 +53,7 @@ function section(title) {
 function step1BuildPayload(userMessage) {
   const { skillDocs, runSkillTool } = getSkillContext();
   const skillDocsBlock = skillDocs
-    ? '\n\n# Available skills\n\n' + skillDocs + '\n\n# Clarification\nWhen information is missing or unclear or a tool returns an error, ask the user a short friendly question; never show raw errors.'
+    ? '\n\n# Available skills\n\n' + skillDocs + '\n\n# Clarification\n' + CLARIFICATION_RULE
     : '';
   const systemPrompt = getScheduleSystemPrompt() + skillDocsBlock;
 
