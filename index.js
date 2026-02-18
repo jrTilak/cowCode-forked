@@ -27,7 +27,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import pino from 'pino';
-import { startCron, stopCron, scheduleOneShot } from './cron/runner.js';
+import { startCron, stopCron, scheduleOneShot, runPastDueOneShots } from './cron/runner.js';
 import { getSkillsEnabled, getSkillContext, DEFAULT_ENABLED } from './skills/loader.js';
 import { initBot, createTelegramSock, isTelegramChatId } from './lib/telegram.js';
 import { addPending as addPendingTelegram, flushPending as flushPendingTelegram } from './lib/pending-telegram.js';
@@ -616,6 +616,7 @@ async function main() {
           return;
         }
         console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
+        await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
         runAgentWithSkills(sock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids }).catch((err) => {
           console.error('Telegram agent error:', err.message);
           const errorText = 'Moo — ' + toUserMessage(err);
@@ -782,6 +783,7 @@ async function main() {
 
       console.log('[incoming]', userText.slice(0, 60) + (userText.length > 60 ? '…' : ''));
       try {
+        await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
         if (m.key.id) {
           try {
             await sock.readMessages([{ remoteJid: jid, id: m.key.id, participant: m.key.participant, fromMe: false }]);
@@ -868,6 +870,7 @@ async function main() {
         return;
       }
       console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
+      await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
       runAgentWithSkills(telegramSock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids }).catch((err) => {
         console.error('Telegram agent error:', err.message);
         const errorText = 'Moo — ' + toUserMessage(err);
