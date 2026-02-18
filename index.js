@@ -3,7 +3,7 @@
  * Config and state live in ~/.cowcode (or COWCODE_STATE_DIR).
  */
 
-import { getAuthDir, getCronStorePath, getConfigPath, getEnvPath, ensureStateDir, getWorkspaceDir, getUploadsDir } from './lib/paths.js';
+import { getAuthDir, getCronStorePath, getConfigPath, getEnvPath, ensureStateDir, getWorkspaceDir, getUploadsDir, getStateDir } from './lib/paths.js';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: getEnvPath() });
@@ -96,6 +96,13 @@ const logger = {
   warn(a, b) { logWithRedact(pinoLogger, 'warn', a, b); },
   error(a, b) { logWithRedact(pinoLogger, 'error', a, b); },
 };
+
+function writeDaemonStarted() {
+  try {
+    const path = join(getStateDir(), 'daemon.started');
+    writeFileSync(path, JSON.stringify({ startedAt: Date.now() }), 'utf8');
+  } catch (_) {}
+}
 
 function wrapForRedaction(pinoInstance) {
   return {
@@ -543,6 +550,7 @@ async function main() {
     const { telegramOnly, telegramBot: optsTelegramBot } = opts;
     if (telegramOnly && optsTelegramBot) {
       telegramBot = optsTelegramBot;
+      writeDaemonStarted();
       startCron({ storePath: getCronStorePath(), telegramBot: optsTelegramBot });
       const lastSentByJid = new Map();
       const ourSentMessageIds = new Set();
@@ -635,6 +643,7 @@ async function main() {
     sock.ev.on('connection.update', (u) => {
     if (u.connection === 'open') {
       console.log('  [connection] connection successful');
+      writeDaemonStarted();
       const sid = sock.user?.id ?? selfJid;
       if (sid) selfJid = sid;
       console.log('  WhatsApp connected. Message your own number to start chatting.');

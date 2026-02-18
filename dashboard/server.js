@@ -10,7 +10,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
-import { getConfigPath, getCronStorePath } from '../lib/paths.js';
+import { getConfigPath, getCronStorePath, getStateDir } from '../lib/paths.js';
+import { getResolvedTimezone, getResolvedTimeFormat } from '../lib/timezone.js';
 import { loadStore } from '../cron/store.js';
 import { DEFAULT_ENABLED } from '../skills/loader.js';
 
@@ -92,6 +93,19 @@ function getSkillMdPath(skillId) {
   return join(dir, 'SKILL.md');
 }
 
+function getDaemonUptimeSeconds() {
+  const path = join(getStateDir(), 'daemon.started');
+  if (!existsSync(path)) return null;
+  try {
+    const data = JSON.parse(readFileSync(path, 'utf8'));
+    const startedAt = data?.startedAt;
+    if (typeof startedAt !== 'number') return null;
+    return Math.floor((Date.now() - startedAt) / 1000);
+  } catch {
+    return null;
+  }
+}
+
 // ---- API ----
 
 app.get('/api/status', async (_req, res) => {
@@ -99,6 +113,39 @@ app.get('/api/status', async (_req, res) => {
     const daemonRunning = await getDaemonRunning();
     const dashboardUrl = `http://${HOST}:${PORT}`;
     res.json({ daemonRunning, dashboardUrl, port: PORT });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/overview', async (_req, res) => {
+  try {
+    const daemonRunning = await getDaemonRunning();
+    const dashboardUrl = `http://${HOST}:${PORT}`;
+    const storePath = getCronStorePath();
+    const store = loadStore(storePath);
+    const jobs = store.jobs || [];
+    const cronCount = jobs.filter((j) => j.enabled !== false).length;
+    const config = loadConfig();
+    const skillsEnabled = Array.isArray(config.skills?.enabled) ? config.skills.enabled : DEFAULT_ENABLED;
+    const skillsEnabledCount = skillsEnabled.length;
+    const models = Array.isArray(config.llm?.models) ? config.llm.models : [];
+    const priorityEntry = models.find((m) => m.priority === true || m.priority === 1 || String(m.priority).toLowerCase() === 'true') || models[0];
+    const priorityModelLabel = priorityEntry ? (priorityEntry.model ? `${priorityEntry.model}` : priorityEntry.provider || '—') : '—';
+    const timezone = getResolvedTimezone();
+    const timeFormat = getResolvedTimeFormat();
+    const daemonUptimeSeconds = daemonRunning ? getDaemonUptimeSeconds() : null;
+    res.json({
+      daemonRunning,
+      dashboardUrl,
+      port: PORT,
+      cronCount,
+      skillsEnabledCount,
+      priorityModelLabel,
+      timezone,
+      timeFormat,
+      daemonUptimeSeconds,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
