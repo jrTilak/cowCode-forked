@@ -36,6 +36,7 @@ import { getSchedulingTimeContext } from './lib/timezone.js';
 import { getOwnerConfig, isOwner } from './lib/owner-config.js';
 import {
   isTelegramGroup,
+  isCronIntent,
   isDrasticIntent,
   isOverRateLimit,
   recordGroupRequest,
@@ -781,6 +782,10 @@ Do not use asterisks in replies.
             await optsTelegramBot.sendMessage(chatId, 'Too many requests from this group. Please wait a minute or ask the bot owner.').catch(() => addPendingTelegram(jidKey, 'Too many requests from this group. Please wait a minute or ask the bot owner.'));
             return;
           }
+          if (isCronIntent(text)) {
+            await optsTelegramBot.sendMessage(chatId, 'Cron jobs are not allowed for group members.').catch(() => addPendingTelegram(jidKey, 'Cron jobs are not allowed for group members.'));
+            return;
+          }
           if (isDrasticIntent(text)) {
             setPendingApproval(ownerCfg.telegramUserId, {
               groupJid: jidKey,
@@ -1121,6 +1126,10 @@ Do not use asterisks in replies.
         const rateKey = `${chatId}:${msg.from?.id ?? 'unknown'}`;
         if (isOverRateLimit(rateKey)) {
           await telegramBot.sendMessage(chatId, 'Too many requests from this group. Please wait a minute or ask the bot owner.').catch(() => addPendingTelegram(jidKey, 'Too many requests from this group. Please wait a minute or ask the bot owner.'));
+          return;
+        }
+        if (isCronIntent(text)) {
+          await telegramBot.sendMessage(chatId, 'Cron jobs are not allowed for group members.').catch(() => addPendingTelegram(jidKey, 'Cron jobs are not allowed for group members.'));
           return;
         }
         if (isDrasticIntent(text)) {
