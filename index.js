@@ -383,18 +383,41 @@ async function main() {
   const useSkills = Array.isArray(skillsEnabled) && skillsEnabled.length > 0 && allTools.length > 0;
   const toolsToUse = useSkills ? allTools : [];
   const useTools = toolsToUse.length > 0;
-  const chatSystemPrompt = `
-    You are CowCode. A helpful assistant.
-    Answer in the language the user asked in.
-    Do not fabricate tool results or data that was not retrieved.
-    You may compute and answer using available results.
-    Do not use <think> or any reasoning blocks—output only the final reply.
-    Do not use asterisks in replies.
-    `;
 
   const skillDocsBlock = skillDocs
     ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
     : '';
+
+  const WHO_AM_I_MD = 'WhoAmI.md';
+  const MY_HUMAN_MD = 'MyHuman.md';
+  const SOUL_MD = 'SOUL.md';
+
+  function readWorkspaceMd(filename) {
+    const p = join(getWorkspaceDir(), filename);
+    try {
+      if (existsSync(p)) return readFileSync(p, 'utf8').trim();
+    } catch (_) {}
+    return '';
+  }
+
+  function ensureSoulMd() {
+    const p = join(getWorkspaceDir(), SOUL_MD);
+    if (existsSync(p)) return;
+    try {
+      ensureStateDir();
+      writeFileSync(p, DEFAULT_SOUL_CONTENT, 'utf8');
+    } catch (err) {
+      console.error('[soul] could not create SOUL.md:', err.message);
+    }
+  }
+
+  const DEFAULT_SOUL_CONTENT = `You are CowCode. A helpful assistant.
+Answer in the language the user asked in.
+Do not fabricate tool results or data that was not retrieved.
+You may compute and answer using available results.
+Do not use <think> or any reasoning blocks—output only the final reply.
+Do not use asterisks in replies.
+`;
 
   function getBioFromConfig() {
     try {
@@ -407,6 +430,7 @@ async function main() {
   }
 
   function isBioSet() {
+    if (readWorkspaceMd(WHO_AM_I_MD) || readWorkspaceMd(MY_HUMAN_MD)) return true;
     const bio = getBioFromConfig();
     if (bio == null) return false;
     if (typeof bio === 'string') return (bio || '').trim() !== '';
@@ -414,14 +438,24 @@ async function main() {
   }
 
   function saveBioToConfig(paragraph) {
+    const text = (paragraph || '').trim() || '';
     try {
       const path = getConfigPath();
       const raw = existsSync(path) ? readFileSync(path, 'utf8') : '{}';
       const config = raw.trim() ? JSON.parse(raw) : {};
-      config.bio = (paragraph || '').trim() || '';
+      config.bio = text;
       writeFileSync(path, JSON.stringify(config, null, 2), 'utf8');
     } catch (err) {
       console.error('[bio] save failed:', err.message);
+    }
+    if (text) {
+      try {
+        ensureStateDir();
+        const whoAmIPath = join(getWorkspaceDir(), WHO_AM_I_MD);
+        writeFileSync(whoAmIPath, text, 'utf8');
+      } catch (err) {
+        console.error('[bio] could not write WhoAmI.md:', err.message);
+      }
     }
   }
 
@@ -435,23 +469,46 @@ async function main() {
   }
 
   function buildSystemPrompt() {
+    ensureSoulMd();
     const timeCtx = getSchedulingTimeContext();
     const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
-    let bioBlock = '';
-    const bio = getBioFromConfig();
-    if (bio != null) {
-      if (typeof bio === 'string' && bio.trim()) {
-        bioBlock = '\n\n' + bio.trim();
-      } else if (typeof bio === 'object' && (bio.userName || bio.assistantName || bio.whoAmI || bio.whoAreYou)) {
-        const parts = [];
-        if (bio.userName) parts.push(`The user's name is ${bio.userName}.`);
-        if (bio.assistantName) parts.push(`Your name is ${bio.assistantName}.`);
-        if (bio.whoAmI) parts.push(`The user describes themselves: ${bio.whoAmI}.`);
-        if (bio.whoAreYou) parts.push(`You describe yourself: ${bio.whoAreYou}.`);
-        if (parts.length) bioBlock = '\n\n' + parts.join(' ');
+    const soulContent = readWorkspaceMd(SOUL_MD) || DEFAULT_SOUL_CONTENT;
+    let whoAmIContent = readWorkspaceMd(WHO_AM_I_MD);
+    const myHumanContent = readWorkspaceMd(MY_HUMAN_MD);
+    if (!whoAmIContent && !myHumanContent) {
+      const bio = getBioFromConfig();
+      const bioText = typeof bio === 'string' && (bio || '').trim() ? bio.trim() : null;
+      if (bioText) {
+        try {
+          ensureStateDir();
+          const whoAmIPath = join(getWorkspaceDir(), WHO_AM_I_MD);
+          if (!existsSync(whoAmIPath)) {
+            writeFileSync(whoAmIPath, bioText, 'utf8');
+            whoAmIContent = bioText;
+          }
+        } catch (_) {}
       }
     }
-    const base = chatSystemPrompt + bioBlock;
+    let identityBlock = '';
+    if (whoAmIContent || myHumanContent) {
+      if (whoAmIContent) identityBlock += '\n\n' + whoAmIContent;
+      if (myHumanContent) identityBlock += '\n\n' + myHumanContent;
+    } else {
+      const bio = getBioFromConfig();
+      if (bio != null) {
+        if (typeof bio === 'string' && bio.trim()) {
+          identityBlock = '\n\n' + bio.trim();
+        } else if (typeof bio === 'object' && (bio.userName || bio.assistantName || bio.whoAmI || bio.whoAreYou)) {
+          const parts = [];
+          if (bio.userName) parts.push(`The user's name is ${bio.userName}.`);
+          if (bio.assistantName) parts.push(`Your name is ${bio.assistantName}.`);
+          if (bio.whoAmI) parts.push(`The user describes themselves: ${bio.whoAmI}.`);
+          if (bio.whoAreYou) parts.push(`You describe yourself: ${bio.whoAreYou}.`);
+          if (parts.length) identityBlock = '\n\n' + parts.join(' ');
+        }
+      }
+    }
+    const base = soulContent + identityBlock;
     return useTools
       ? base + timeBlock + skillDocsBlock
       : base + `\n\n${timeCtx.timeContextLine}`;
