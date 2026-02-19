@@ -11,7 +11,7 @@ import { getConfigPath } from '../lib/paths.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Default skill ids enabled on new install and added by migration on update. */
-export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 'gog'];
+export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 'gog', 'read'];
 
 const SKILL_JSON = 'skill.json';
 const MD_NAMES = ['skill.md', 'SKILL.md'];

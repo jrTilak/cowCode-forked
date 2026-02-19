@@ -6,7 +6,7 @@ Call **run_skill** with **skill: "read"**. Set **command** or **arguments.action
 
 ## Arguments
 
-- **arguments.path** (required) — File path to read. Can be relative to workspace (e.g. `surface/main.py`, `MEMORY.md`) or an absolute path the bot is allowed to read.
+- **arguments.path** (required) — File path to read. Can be relative to workspace (e.g. `surface/main.py`, `MEMORY.md`), absolute (e.g. `/path/to/file`), or use `~` for home (e.g. `~/.cowcode/config.json`).
 - **arguments.from** (optional) — Start at 1-based line number.
 - **arguments.lines** (optional) — Max number of lines to return (default: all).
 
