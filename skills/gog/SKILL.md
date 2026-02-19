@@ -1,124 +1,58 @@
+---
+name: gog
+description: Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.
+homepage: https://gogcli.sh
+---
+
 # gog
 
-Use `gog` for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.
-Requires OAuth setup.
+Use `gog` to access Gmail, Calendar, Drive, Contacts, Sheets, and Docs.
 
-Call `run_skill` with `skill: "gog"` and `arguments` as below.
+Call `run_skill` with:
+- skill: "gog"
+- arguments.action: "run"
+- arguments.argv: array of command parts (do not include `gog`)
 
-Always set `arguments.action` to exactly `"run"`.
-Never omit `action`.
+Always use:
+--json
+--no-input
 
----
-
-## arguments shape
-
-- action: "run"  
-  Run a `gog` command.
-
-- argv (required)  
-  Array of strings for the `gog` command.  
-  Do NOT include the `gog` prefix.
-
-  Example:
-  ["gmail","search","newer_than:7d","--max","10","--json","--no-input"]
-
-- account (optional)  
-  Email account for this call (sets `GOG_ACCOUNT`).
-
-- confirm (required for sending mail or creating calendar events)  
-  Must be true when using:
-  - gmail send
-  - calendar create
-  - calendar add
-  - calendar insert
+Never fabricate tool output.
 
 ---
 
-## Setup (once)
+## Arguments
 
-gog auth credentials /path/to/client_secret.json  
-gog auth add you@gmail.com --services gmail,calendar,drive,contacts,sheets,docs  
-gog auth list  
+- action: must be exactly "run"
+- argv: array of strings for the gog command
+- account: optional
+- confirm: required for gmail send or calendar create/add/insert
 
----
-
-## Common commands
-
-Gmail search  
-gog gmail search "newer_than:7d" --max 10 --json --no-input  
-
-Gmail send  
-gog gmail send --to a@b.com --subject "Hi" --body "Hello" --json --no-input  
-
-Calendar events  
-gog calendar events <calendarId> --from <iso> --to <iso> --json --no-input  
-
-Drive search  
-gog drive search "query" --max 10 --json --no-input  
-
-Contacts list  
-gog contacts list --max 20 --json --no-input  
-
-Sheets get  
-gog sheets get <sheetId> "Tab!A1:D10" --json --no-input  
-
-Sheets update  
-gog sheets update <sheetId> "Tab!A1:B2" --values-json '[["A","B"],["1","2"]]' --input USER_ENTERED --json --no-input  
-
-Sheets append  
-gog sheets append <sheetId> "Tab!A:C" --values-json '[["x","y","z"]]' --insert INSERT_ROWS --json --no-input  
-
-Sheets clear  
-gog sheets clear <sheetId> "Tab!A2:Z" --json --no-input  
-
-Sheets metadata  
-gog sheets metadata <sheetId> --json --no-input  
-
-Docs export  
-gog docs export <docId> --format txt --out /tmp/doc.txt  
-
-Docs cat  
-gog docs cat <docId>  
+Example:
+["gmail","search","newer_than:7d","--max","5000","--json","--no-input"]
 
 ---
 
-## Result Size & Aggregation Policy
+## Gmail Behavior Policy
 
-When performing Gmail searches that require counting, aggregation, or determining top senders:
+Default mail scope:
+- Use All Mail
+- Exclude Sent
+- Do not ask for scope clarification unless explicitly requested
 
-- You may set `--max` to a high value (example: 2000 or 5000) to retrieve all relevant results within a time window.
-- Best-effort full retrieval is acceptable.
-- Do NOT block execution due to lack of pagination.
-- If the number of returned results equals the `--max` value, warn that results may be truncated.
-- Prefer `--json` and `--no-input` for machine-readable output.
-- Count using the `From` header in returned results.
+Result retrieval:
+- Use a sufficiently large --max (e.g. 5000) when analysis or counting is required
+- Compute using retrieved results even if additional pages may exist
+- Only warn about truncation if result count equals --max
 
-Do not assume pagination exists.
-Do not refuse execution solely because pagination is unavailable.
-If additional pages exist, compute using the retrieved results and provide the answer.
-Do not refuse solely because more pages may exist.
+Do not refuse execution solely due to pagination or nextPageToken.
 
 ---
 
-## Execution Rules
+## Execution Principles
 
-- Always include `--json` when structured output is needed.
-- Always include `--no-input` for automation.
-- Never fabricate tool output.
-- If a command fails, report the error.
-- Do not simulate Gmail results.
-- Only use the tool for real data retrieval.
-
----
-
-## Notes
-
-Set `GOG_ACCOUNT=you@gmail.com` to avoid repeating `--account`.  
-Or set `skills.gog.account` in config.json to provide a default account.
-
-Sheets values should be passed via `--values-json` when possible.
-
-Docs supports export, cat, and copy.  
-In-place edits require a Docs API client and are not supported in gog.
-
-Always confirm before sending mail or creating events.
+- Prefer single decisive tool call when possible
+- Do not negotiate default behavior
+- Do not offer UI alternatives unless tool execution fails
+- Provide computed answer directly after analysis
+- Be concise and decisive
