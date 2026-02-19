@@ -134,6 +134,21 @@ Then:
 cowcode moo start
 ```
 
+**Group authority (groups only)** — In **group** chats (not one-on-one), you can set a **bot owner** (the person who set up/controls the bot). Authority is **not** based on Telegram group admin or group creator — only on config.
+
+* **Drastic actions** (run commands, edit files, browse the web, schedule reminders, etc.) require the **bot owner** to approve. The bot owner gets a DM; they reply `/approve` or `/deny`.
+* **Rate limit** — Too many requests from the group in a short time triggers a cooldown message.
+
+Set the **bot owner’s** Telegram user ID in config (get it from [@userinfobot](https://t.me/userinfobot)):
+
+```json
+"owner": { "telegramUserId": 123456789 }
+```
+
+One-on-one chats with the bot are unchanged: no approval or rate limits.
+
+**Group isolation** — In groups, the bot keeps **separate** history, logs, and memory so they never pollute your main data: in-memory conversation context is per group (by chat id), group chats are logged only to `workspace/group-chat-log/<group-id>/`, and group exchanges are **not** indexed into the main memory (so "Remember what we said?" in private never sees group conversations).
+
 ---
 
 # ➕ Add WhatsApp Later

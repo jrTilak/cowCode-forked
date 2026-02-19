@@ -29,12 +29,23 @@ import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, copyFileSyn
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot, runPastDueOneShots } from './cron/runner.js';
 import { getSkillsEnabled, getSkillContext, DEFAULT_ENABLED } from './skills/loader.js';
-import { initBot, createTelegramSock, isTelegramChatId } from './lib/telegram.js';
+import { initBot, createTelegramSock, isTelegramChatId, isTelegramGroupJid } from './lib/telegram.js';
 import { addPending as addPendingTelegram, flushPending as flushPendingTelegram } from './lib/pending-telegram.js';
 import { getChannelsConfig } from './lib/channels-config.js';
 import { getSchedulingTimeContext } from './lib/timezone.js';
+import { getOwnerConfig, isOwner } from './lib/owner-config.js';
+import {
+  isTelegramGroup,
+  isDrasticIntent,
+  isOverRateLimit,
+  recordGroupRequest,
+  setPendingApproval,
+  getPendingApproval,
+  clearPendingApproval,
+} from './lib/group-guard.js';
 import { getMemoryConfig } from './lib/memory-config.js';
 import { indexChatExchange } from './lib/memory-index.js';
+import { appendGroupExchange } from './lib/chat-log.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
 import { toUserMessage } from './lib/user-error.js';
 import { getSpeechConfig, transcribe, synthesizeToBuffer } from './lib/speech-client.js';
@@ -573,11 +584,21 @@ Do not use asterisks in replies.
       }
       lastSentByJidMap.set(jid, textForSend);
       pushExchange(jid, text, textForSend);
-      const memoryConfig = getMemoryConfig();
-      if (memoryConfig) {
-        indexChatExchange(memoryConfig, { user: text, assistant: textForSend, timestampMs: Date.now(), jid }).catch((err) =>
-          console.error('[memory] auto-index failed:', err.message)
-        );
+      const ts = Date.now();
+      const exchange = { user: text, assistant: textForSend, timestampMs: ts, jid };
+      if (isTelegramGroupJid(jid)) {
+        try {
+          appendGroupExchange(getWorkspaceDir(), jid, exchange);
+        } catch (err) {
+          console.error('[group-chat-log] write failed:', err.message);
+        }
+      } else {
+        const memoryConfig = getMemoryConfig();
+        if (memoryConfig) {
+          indexChatExchange(memoryConfig, exchange).catch((err) =>
+            console.error('[memory] auto-index failed:', err.message)
+          );
+        }
       }
       console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
       if (bioOpts.pendingBioConfirmJids != null && !isBioSet()) {
@@ -728,6 +749,54 @@ Do not use asterisks in replies.
           const reply = 'Browser reset. Next browse will start fresh.';
           await optsTelegramBot.sendMessage(chatId, reply).catch(() => addPendingTelegram(String(chatId), reply));
           return;
+        }
+        // Group guard: only in groups (never in one-on-one). Owner = bot owner from config (not group admin/creator). Bot owner in DM can approve/deny pending requests.
+        const inGroup = isTelegramGroup(msg.chat);
+        const ownerCfg = getOwnerConfig();
+        if (!inGroup && ownerCfg.telegramUserId && msg.from?.id === ownerCfg.telegramUserId) {
+          const pending = getPendingApproval(ownerCfg.telegramUserId);
+          if (pending) {
+            const cmd = text.trim().toLowerCase();
+            if (cmd === '/approve' || cmd === 'approve') {
+              clearPendingApproval(ownerCfg.telegramUserId);
+              await optsTelegramBot.sendMessage(chatId, 'Approved. Running the request in the group.').catch(() => addPendingTelegram(jidKey, 'Approved. Running the request in the group.'));
+              await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
+              runAgentWithSkills(sock, pending.groupJid, pending.userMessage, lastSentByJid, pending.groupJid, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice: false }).catch((err) => {
+                console.error('Telegram agent error (approved request):', err.message);
+                optsTelegramBot.sendMessage(pending.groupJid, 'Moo — ' + toUserMessage(err)).catch(() => addPendingTelegram(pending.groupJid, 'Moo — ' + toUserMessage(err)));
+              });
+              return;
+            }
+            if (cmd === '/deny' || cmd === 'deny') {
+              clearPendingApproval(ownerCfg.telegramUserId);
+              await optsTelegramBot.sendMessage(chatId, 'Denied.').catch(() => addPendingTelegram(jidKey, 'Denied.'));
+              await optsTelegramBot.sendMessage(pending.groupJid, 'Request denied by bot owner.').catch(() => addPendingTelegram(pending.groupJid, 'Request denied by bot owner.'));
+              return;
+            }
+          }
+        }
+        if (inGroup && ownerCfg.telegramUserId && !isOwner(msg.from?.id)) {
+          const rateKey = `${chatId}:${msg.from?.id ?? 'unknown'}`;
+          if (isOverRateLimit(rateKey)) {
+            await optsTelegramBot.sendMessage(chatId, 'Too many requests from this group. Please wait a minute or ask the bot owner.').catch(() => addPendingTelegram(jidKey, 'Too many requests from this group. Please wait a minute or ask the bot owner.'));
+            return;
+          }
+          if (isDrasticIntent(text)) {
+            setPendingApproval(ownerCfg.telegramUserId, {
+              groupJid: jidKey,
+              groupTitle: msg.chat?.title,
+              fromId: msg.from?.id,
+              fromUsername: msg.from?.username,
+              fromName: msg.from?.first_name,
+              userMessage: text,
+            });
+            await optsTelegramBot.sendMessage(chatId, "This kind of action requires bot owner approval. The bot owner has been notified.").catch(() => addPendingTelegram(jidKey, "This kind of action requires bot owner approval. The bot owner has been notified."));
+            const ownerLabel = msg.chat?.title ? `group "${msg.chat.title}"` : `group (${chatId})`;
+            const fromLabel = [msg.from?.first_name, msg.from?.username].filter(Boolean).join(' @') || msg.from?.id || 'Someone';
+            await optsTelegramBot.sendMessage(ownerCfg.telegramUserId, `In ${ownerLabel}, ${fromLabel} asked:\n\n"${text.slice(0, 500)}${text.length > 500 ? '…' : ''}"\n\nReply /approve to allow once, or /deny to deny.`).catch(() => addPendingTelegram(String(ownerCfg.telegramUserId), 'Pending approval notification could not be sent.'));
+            return;
+          }
+          recordGroupRequest(rateKey);
         }
         console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
         await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
@@ -1022,6 +1091,54 @@ Do not use asterisks in replies.
         const reply = 'Browser reset. Next browse will start fresh.';
         await telegramBot.sendMessage(chatId, reply).catch(() => addPendingTelegram(String(chatId), reply));
         return;
+      }
+      // Group guard: only in groups (never in one-on-one). Owner = bot owner from config (not group admin/creator). Bot owner in DM can approve/deny pending requests.
+      const inGroup = isTelegramGroup(msg.chat);
+      const ownerCfg = getOwnerConfig();
+      if (!inGroup && ownerCfg.telegramUserId && msg.from?.id === ownerCfg.telegramUserId) {
+        const pending = getPendingApproval(ownerCfg.telegramUserId);
+        if (pending) {
+          const cmd = text.trim().toLowerCase();
+          if (cmd === '/approve' || cmd === 'approve') {
+            clearPendingApproval(ownerCfg.telegramUserId);
+            await telegramBot.sendMessage(chatId, 'Approved. Running the request in the group.').catch(() => addPendingTelegram(jidKey, 'Approved. Running the request in the group.'));
+            await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
+            runAgentWithSkills(telegramSock, pending.groupJid, pending.userMessage, lastSentByJid, pending.groupJid, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice: false }).catch((err) => {
+              console.error('Telegram agent error (approved request):', err.message);
+              telegramBot.sendMessage(pending.groupJid, 'Moo — ' + toUserMessage(err)).catch(() => addPendingTelegram(pending.groupJid, 'Moo — ' + toUserMessage(err)));
+            });
+            return;
+          }
+          if (cmd === '/deny' || cmd === 'deny') {
+            clearPendingApproval(ownerCfg.telegramUserId);
+            await telegramBot.sendMessage(chatId, 'Denied.').catch(() => addPendingTelegram(jidKey, 'Denied.'));
+            await telegramBot.sendMessage(pending.groupJid, 'Request denied by bot owner.').catch(() => addPendingTelegram(pending.groupJid, 'Request denied by bot owner.'));
+            return;
+          }
+        }
+      }
+      if (inGroup && ownerCfg.telegramUserId && !isOwner(msg.from?.id)) {
+        const rateKey = `${chatId}:${msg.from?.id ?? 'unknown'}`;
+        if (isOverRateLimit(rateKey)) {
+          await telegramBot.sendMessage(chatId, 'Too many requests from this group. Please wait a minute or ask the bot owner.').catch(() => addPendingTelegram(jidKey, 'Too many requests from this group. Please wait a minute or ask the bot owner.'));
+          return;
+        }
+        if (isDrasticIntent(text)) {
+          setPendingApproval(ownerCfg.telegramUserId, {
+            groupJid: jidKey,
+            groupTitle: msg.chat?.title,
+            fromId: msg.from?.id,
+            fromUsername: msg.from?.username,
+            fromName: msg.from?.first_name,
+            userMessage: text,
+          });
+          await telegramBot.sendMessage(chatId, "This kind of action requires bot owner approval. The bot owner has been notified.").catch(() => addPendingTelegram(jidKey, "This kind of action requires bot owner approval. The bot owner has been notified."));
+          const ownerLabel = msg.chat?.title ? `group "${msg.chat.title}"` : `group (${chatId})`;
+          const fromLabel = [msg.from?.first_name, msg.from?.username].filter(Boolean).join(' @') || msg.from?.id || 'Someone';
+          await telegramBot.sendMessage(ownerCfg.telegramUserId, `In ${ownerLabel}, ${fromLabel} asked:\n\n"${text.slice(0, 500)}${text.length > 500 ? '…' : ''}"\n\nReply /approve to allow once, or /deny to deny.`).catch(() => addPendingTelegram(String(ownerCfg.telegramUserId), 'Pending approval notification could not be sent.'));
+          return;
+        }
+        recordGroupRequest(rateKey);
       }
       console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
       await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
