@@ -11,7 +11,7 @@ import { getConfigPath } from '../lib/paths.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Default skill ids enabled on new install and added by migration on update. */
-export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 'gog', 'read'];
+export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 'speech', 'gog', 'read'];
 
 /** Core commands (ls, cd, pwd, cat, less, cp, mv, rm, touch, chmod). Always loaded; no need to enable in config. */
 const CORE_SKILL_IDS = ['core'];

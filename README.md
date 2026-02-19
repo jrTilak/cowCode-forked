@@ -94,7 +94,7 @@ Get latest version anytime:
 cowcode update
 ```
 
-Your config, auth, and skills stay safe. No fresh install needed. New default skills (e.g. browse, vision, memory) are added automatically on next start. If you use a text-only LLM and want image reading, re-run setup to configure the vision fallback.
+Your config, auth, and skills stay safe. No fresh install needed. New default skills (e.g. browse, vision, memory, speech) are added automatically on next start. If you use a text-only LLM and want image reading, re-run setup to configure the vision fallback. For voice (Whisper + 11Labs), re-run setup to configure the speech APIs.
 
 ---
 

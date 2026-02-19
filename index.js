@@ -37,6 +37,7 @@ import { getMemoryConfig } from './lib/memory-config.js';
 import { indexChatExchange } from './lib/memory-index.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
 import { toUserMessage } from './lib/user-error.js';
+import { getSpeechConfig, transcribe, synthesizeToBuffer } from './lib/speech-client.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -253,7 +254,7 @@ async function runAuthOnly(opts = {}) {
   });
 }
 
-/** Migration: ensure all default skills (cron, search, browse, vision, memory) are in skills.enabled so new installs and updates get them without fresh install. */
+/** Migration: ensure all default skills (cron, search, browse, vision, memory, speech, etc.) are in skills.enabled so new installs and updates get them without fresh install. */
 function migrateSkillsConfigToIncludeDefaults() {
   try {
     const path = getConfigPath();
@@ -548,8 +549,21 @@ Do not use asterisks in replies.
       historyMessages: getLast5Exchanges(jid),
     });
     const textForSend = isTelegramChatId(jid) ? textToSend.replace(/^\[CowCode\]\s*/i, '').trim() : textToSend;
+    let voiceBuffer = null;
+    if (bioOpts.replyWithVoice && textForSend && textForSend.trim()) {
+      try {
+        const speechConfig = getSpeechConfig();
+        if (speechConfig?.elevenLabsApiKey) {
+          voiceBuffer = await synthesizeToBuffer(speechConfig.elevenLabsApiKey, textForSend, speechConfig.defaultVoiceId);
+        }
+      } catch (err) {
+        console.error('[speech] synthesize failed:', err.message);
+      }
+    }
     try {
-      const sent = await sock.sendMessage(jid, { text: textForSend });
+      const sent = voiceBuffer
+        ? await sock.sendMessage(jid, isTelegramChatId(jid) ? { voice: voiceBuffer } : { audio: voiceBuffer, ptt: true })
+        : await sock.sendMessage(jid, { text: textForSend });
       if (sent?.key?.id && ourSentIdsRef?.current) {
         ourSentIdsRef.current.add(sent.key.id);
         if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
@@ -641,6 +655,7 @@ Do not use asterisks in replies.
         const chatId = msg.chat?.id;
         let text = (msg.text || '').trim();
         if (chatId == null) return;
+        let replyWithVoice = false;
         if (!text && msg.photo && msg.photo.length > 0) {
           try {
             const photo = msg.photo[msg.photo.length - 1];
@@ -658,6 +673,26 @@ Do not use asterisks in replies.
           } catch (err) {
             console.error('[telegram] image download failed:', err.message);
             return;
+          }
+        }
+        if (!text && msg.voice) {
+          try {
+            const speechConfig = getSpeechConfig();
+            if (speechConfig?.whisperApiKey) {
+              const file = await optsTelegramBot.getFile(msg.voice.file_id);
+              const token = getChannelsConfig().telegram.botToken;
+              const downloadUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+              const res = await fetch(downloadUrl);
+              const buf = Buffer.from(await res.arrayBuffer());
+              const uploadsDir = getUploadsDir();
+              if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+              const audioPath = join(uploadsDir, `tg-voice-${chatId}-${msg.message_id}.ogg`);
+              writeFileSync(audioPath, buf);
+              text = await transcribe(speechConfig.whisperApiKey, audioPath);
+              if (text && text.trim()) replyWithVoice = true;
+            }
+          } catch (err) {
+            console.error('[telegram] voice transcribe failed:', err.message);
           }
         }
         if (!text) return;
@@ -696,7 +731,7 @@ Do not use asterisks in replies.
         }
         console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
         await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
-        runAgentWithSkills(sock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids }).catch((err) => {
+        runAgentWithSkills(sock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice }).catch((err) => {
           console.error('Telegram agent error:', err.message);
           const errorText = 'Moo — ' + toUserMessage(err);
           optsTelegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
@@ -776,6 +811,7 @@ Do not use asterisks in replies.
 
       const content = extractMessageContent(m.message);
       let userText = (content?.conversation || content?.extendedTextMessage?.text || '').trim();
+      let replyWithVoice = false;
       if (!userText && content?.imageMessage) {
         try {
           const buf = await downloadMediaMessage(m, 'buffer', {});
@@ -789,6 +825,24 @@ Do not use asterisks in replies.
         } catch (err) {
           console.error('[image] download failed:', err.message);
           continue;
+        }
+      }
+      if (!userText && content?.audioMessage) {
+        try {
+          const speechConfig = getSpeechConfig();
+          if (speechConfig?.whisperApiKey) {
+            const buf = await downloadMediaMessage(m, 'buffer', {});
+            const uploadsDir = getUploadsDir();
+            if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+            const msgId = m.key?.id || Date.now();
+            const ext = (content.audioMessage.mimetype || '').includes('ogg') ? 'ogg' : 'm4a';
+            const audioPath = join(uploadsDir, `voice-${msgId}.${ext}`);
+            writeFileSync(audioPath, buf);
+            userText = await transcribe(speechConfig.whisperApiKey, audioPath);
+            if (userText && userText.trim()) replyWithVoice = true;
+          }
+        } catch (err) {
+          console.error('[voice] transcribe failed:', err.message);
         }
       }
       if (!userText) continue;
@@ -869,7 +923,7 @@ Do not use asterisks in replies.
           } catch (_) {}
         }
 
-        runAgentWithSkills(sock, jid, userText, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids }).catch((err) => {
+        runAgentWithSkills(sock, jid, userText, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice }).catch((err) => {
           console.error('Background agent error:', err.message);
           const errorText = '[CowCode] Moo — ' + toUserMessage(err);
           sock.sendMessage(jid, { text: errorText }).catch(() => {
@@ -895,6 +949,7 @@ Do not use asterisks in replies.
       const chatId = msg.chat?.id;
       let text = (msg.text || '').trim();
       if (chatId == null) return;
+      let replyWithVoice = false;
       if (!text && msg.photo && msg.photo.length > 0) {
         try {
           const photo = msg.photo[msg.photo.length - 1];
@@ -912,6 +967,26 @@ Do not use asterisks in replies.
         } catch (err) {
           console.error('[telegram] image download failed:', err.message);
           return;
+        }
+      }
+      if (!text && msg.voice) {
+        try {
+          const speechConfig = getSpeechConfig();
+          if (speechConfig?.whisperApiKey) {
+            const file = await telegramBot.getFile(msg.voice.file_id);
+            const token = getChannelsConfig().telegram.botToken;
+            const downloadUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+            const res = await fetch(downloadUrl);
+            const buf = Buffer.from(await res.arrayBuffer());
+            const uploadsDir = getUploadsDir();
+            if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+            const audioPath = join(uploadsDir, `tg-voice-${chatId}-${msg.message_id}.ogg`);
+            writeFileSync(audioPath, buf);
+            text = await transcribe(speechConfig.whisperApiKey, audioPath);
+            if (text && text.trim()) replyWithVoice = true;
+          }
+        } catch (err) {
+          console.error('[telegram] voice transcribe failed:', err.message);
         }
       }
       if (!text) return;
@@ -950,7 +1025,7 @@ Do not use asterisks in replies.
       }
       console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
       await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
-      runAgentWithSkills(telegramSock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids }).catch((err) => {
+      runAgentWithSkills(telegramSock, jidKey, text, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice }).catch((err) => {
         console.error('Telegram agent error:', err.message);
         const errorText = 'Moo — ' + toUserMessage(err);
         telegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));

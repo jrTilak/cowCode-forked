@@ -14,6 +14,7 @@ import { executeWrite } from '../lib/executors/write.js';
 import { executeEdit } from '../lib/executors/edit.js';
 import { executeApplyPatch } from '../lib/executors/apply-patch.js';
 import { executeCore } from '../lib/executors/core.js';
+import { executeSpeech } from '../lib/executors/speech.js';
 
 const EXECUTORS = {
   cron: executeCron,
@@ -21,6 +22,7 @@ const EXECUTORS = {
   browse: executeBrowse,
   vision: executeVision,
   memory: executeMemory,
+  speech: executeSpeech,
   gog: executeGog,
   read: executeRead,
   write: executeWrite,
