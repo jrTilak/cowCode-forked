@@ -7,6 +7,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { getConfigPath } from '../lib/paths.js';
+import { SKILLS_NOT_ALLOWED_FOR_GROUP_NON_OWNER } from './executor.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -42,11 +43,16 @@ export function getSkillsEnabled() {
 /**
  * Load skill folders (skill.json + skill.md) for enabled ids. Return docs string and one run_skill tool.
  * No branching: one tool, LLM fills skill + arguments from the prompts. Code stays dumb.
+ * @param {{ groupNonOwner?: boolean }} [options] - When true, exclude skills not allowed for group members (so LLM never sees or calls them).
  * @returns {{ skillDocs: string, runSkillTool: Array }}
  */
-export function getSkillContext() {
+export function getSkillContext(options = {}) {
+  const { groupNonOwner = false } = options;
   const enabled = getSkillsEnabled();
-  const idsToLoad = [...new Set([...enabled, ...CORE_SKILL_IDS])];
+  let idsToLoad = [...new Set([...enabled, ...CORE_SKILL_IDS])];
+  if (groupNonOwner) {
+    idsToLoad = idsToLoad.filter((id) => !SKILLS_NOT_ALLOWED_FOR_GROUP_NON_OWNER.has(id));
+  }
   const parts = [];
   const available = [];
 

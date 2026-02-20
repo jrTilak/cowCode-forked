@@ -17,8 +17,8 @@ import { executeApplyPatch } from '../lib/executors/apply-patch.js';
 import { executeCore } from '../lib/executors/core.js';
 import { executeSpeech } from '../lib/executors/speech.js';
 
-/** Skills that group members (non-owners) cannot use. Owner and private chats are not restricted. */
-const SKILLS_NOT_ALLOWED_FOR_GROUP_NON_OWNER = new Set([
+/** Skills that group members (non-owners) cannot use. Owner and private chats are not restricted. Exported for loader to hide from group tool list. */
+export const SKILLS_NOT_ALLOWED_FOR_GROUP_NON_OWNER = new Set([
   'core', 'read', 'write', 'edit', 'apply-patch', 'browse', 'cron', 'gog',
 ]);
 

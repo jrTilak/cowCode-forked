@@ -502,6 +502,8 @@ Do not use asterisks in replies.
     if (opts.groupSenderName) {
       soulContent += `\n\nYou are in a group chat. The current message was sent by ${opts.groupSenderName}. Messages may be prefixed with "Message from [name] in the group" — that [name] is the sender. When greeting, use that exact name (e.g. "Hey ${opts.groupSenderName}" or "Hi ${opts.groupSenderName}"). Never attribute a request to the bot owner unless the prefix says the bot owner's name. When asked who asked something, name the person from the "Message from [name]" prefix. In group chat, do not proactively list directories, scan multiple files, or enumerate skills; only do the specific action the user asked for (e.g. read only the file they named).`;
     }
+    const effectiveSkillDocsBlock = opts.skillDocsBlock != null ? opts.skillDocsBlock : skillDocsBlock;
+    const effectiveUseTools = opts.useTools != null ? opts.useTools : useTools;
     let whoAmIContent = readWorkspaceMd(WHO_AM_I_MD);
     const myHumanContent = readWorkspaceMd(MY_HUMAN_MD);
     if (!whoAmIContent && !myHumanContent) {
@@ -538,8 +540,8 @@ Do not use asterisks in replies.
       }
     }
     const base = soulContent + identityBlock;
-    return useTools
-      ? base + timeBlock + skillDocsBlock
+    return effectiveUseTools
+      ? base + timeBlock + effectiveSkillDocsBlock
       : base + `\n\n${timeCtx.timeContextLine}`;
   }
 
@@ -556,11 +558,28 @@ Do not use asterisks in replies.
       startCron: () => startCron({ sock, selfJid: selfJidForCron, storePath: getCronStorePath(), telegramBot: telegramBot || undefined }),
       groupNonOwner: !!bioOpts.groupNonOwner,
     };
+    const isGroupNonOwner = !!bioOpts.groupNonOwner;
+    const { toolsForRequest, systemPromptOpts } = isGroupNonOwner
+      ? (() => {
+          const { skillDocs: groupSkillDocs, runSkillTool: groupTools } = getSkillContext({ groupNonOwner: true });
+          const groupSkillDocsBlock = groupSkillDocs
+            ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${groupSkillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
+            : '';
+          return {
+            toolsForRequest: groupTools,
+            systemPromptOpts: {
+              groupSenderName: bioOpts.groupSenderName,
+              skillDocsBlock: groupSkillDocsBlock,
+              useTools: groupTools.length > 0,
+            },
+          };
+        })()
+      : { toolsForRequest: toolsToUse, systemPromptOpts: { groupSenderName: bioOpts.groupSenderName } };
     const { textToSend } = await runAgentTurn({
       userText: text,
       ctx,
-      systemPrompt: buildSystemPrompt({ groupSenderName: bioOpts.groupSenderName }),
-      tools: toolsToUse,
+      systemPrompt: buildSystemPrompt(systemPromptOpts),
+      tools: toolsForRequest,
       historyMessages: getLast5Exchanges(jid),
     });
     const textForSend = isTelegramChatId(jid) ? textToSend.replace(/^\[CowCode\]\s*/i, '').trim() : textToSend;
