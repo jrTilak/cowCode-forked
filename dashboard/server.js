@@ -9,7 +9,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { getConfigPath, getCronStorePath, getStateDir, getGroupConfigPath, getWorkspaceDir, getEnvPath } from '../lib/paths.js';
 
@@ -434,43 +434,22 @@ app.get('/', (_req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
 
-async function killProcessOnPort(port) {
-  try {
-    const out = execSync(`lsof -ti :${port}`, { encoding: 'utf8' });
-    const pids = out.trim().split(/\s+/).filter(Boolean);
-    for (const pid of pids) {
-      try {
-        process.kill(Number(pid), 'SIGTERM');
-      } catch (_) {}
-    }
-    if (pids.length) {
-      const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-      await delay(400);
-    }
-  } catch (_) {
-    // No process on port
+const server = app.listen(PORT, HOST, () => {
+  console.log('');
+  console.log('  cowCode Dashboard');
+  console.log('  ─────────────────');
+  console.log(`  URL: http://${HOST}:${PORT}`);
+  console.log('  (Use this URL to POST data for future features.)');
+  console.log('');
+  console.log('  Press Ctrl+C to stop.');
+  console.log('');
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is in use. Set COWCODE_DASHBOARD_PORT to another port.`);
+  } else {
+    console.error(err);
   }
-}
-
-(async () => {
-  await killProcessOnPort(PORT);
-  const server = app.listen(PORT, HOST, () => {
-    console.log('');
-    console.log('  cowCode Dashboard');
-    console.log('  ─────────────────');
-    console.log(`  URL: http://${HOST}:${PORT}`);
-    console.log('  (Use this URL to POST data for future features.)');
-    console.log('');
-    console.log('  Press Ctrl+C to stop.');
-    console.log('');
-  });
-
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`Port ${PORT} is in use. Set COWCODE_DASHBOARD_PORT to another port.`);
-    } else {
-      console.error(err);
-    }
-    process.exit(1);
-  });
-})();
+  process.exit(1);
+});
