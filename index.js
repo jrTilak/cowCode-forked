@@ -349,6 +349,23 @@ async function main() {
   /** Set in runBot (WhatsApp: initBot; Telegram-only: opts); null in --test so cron ctx does not throw. */
   let telegramBot = null;
 
+  /** Returns a function that resolves to the given bot's username (cached after first getMe()). */
+  function createGetBotUsername(bot) {
+    let cached = undefined;
+    return async function getBotUsername() {
+      if (!bot) return null;
+      if (cached !== undefined) return cached;
+      try {
+        const me = await bot.getMe();
+        cached = me.username ?? null;
+        return cached;
+      } catch {
+        cached = null;
+        return null;
+      }
+    };
+  }
+
   const config = loadConfig();
   const first = config.models[0];
   console.log('LLM config:', config.models.length > 1
@@ -505,6 +522,11 @@ Do not use asterisks in replies.
       : (readWorkspaceMd(SOUL_MD) || DEFAULT_SOUL_CONTENT) + pathsLine;
     if (forGroup) {
       soulContent += `\n\nYou are in a group chat. The current message was sent by ${opts.groupSenderName}. Messages may be prefixed with "Message from [name] in the group" — that [name] is the sender. When greeting, use that exact name (e.g. "Hey ${opts.groupSenderName}" or "Hi ${opts.groupSenderName}"). Never attribute a request to the bot owner unless the prefix says the bot owner's name. When asked who asked something, name the person from the "Message from [name]" prefix. In group chat, do not proactively list directories, scan multiple files, or enumerate skills; only do the specific action the user asked for (e.g. read only the file they named).`;
+      if (opts.groupMentioned) {
+        soulContent += `\n\nYou were @mentioned in this message — please reply.`;
+      } else {
+        soulContent += `\n\nYou were NOT @mentioned. Reply only when: (1) you notice important information is missing or incorrect and you can add value, or (2) there has been a long gap since your last message and it's natural to chime in. If you have nothing important to add, output exactly: [NO_REPLY] and nothing else.`;
+      }
     }
     const effectiveSkillDocsBlock = opts.skillDocsBlock != null ? opts.skillDocsBlock : skillDocsBlock;
     const effectiveUseTools = opts.useTools != null ? opts.useTools : useTools;
@@ -575,6 +597,7 @@ Do not use asterisks in replies.
             systemPromptOpts: {
               groupSenderName: bioOpts.groupSenderName,
               groupJid,
+              groupMentioned: !!bioOpts.groupMentioned,
               skillDocsBlock: groupSkillDocsBlock,
               useTools: groupTools.length > 0,
             },
@@ -592,69 +615,73 @@ Do not use asterisks in replies.
       historyMessages,
     });
     const textForSend = isTelegramChatId(jid) ? textToSend.replace(/^\[CowCode\]\s*/i, '').trim() : textToSend;
-    let voiceBuffer = null;
-    if (bioOpts.replyWithVoice && textForSend && textForSend.trim()) {
-      try {
-        const speechConfig = getSpeechConfig();
-        if (speechConfig?.elevenLabsApiKey) {
-          voiceBuffer = await synthesizeToBuffer(speechConfig.elevenLabsApiKey, textForSend, speechConfig.defaultVoiceId);
-        }
-      } catch (err) {
-        console.error('[speech] synthesize failed:', err.message);
-      }
-    }
-    try {
-      const sent = voiceBuffer
-        ? await sock.sendMessage(jid, isTelegramChatId(jid) ? { voice: voiceBuffer } : { audio: voiceBuffer, ptt: true })
-        : await sock.sendMessage(jid, { text: textForSend });
-      if (sent?.key?.id && ourSentIdsRef?.current) {
-        ourSentIdsRef.current.add(sent.key.id);
-        if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
-          const first = ourSentIdsRef.current.values().next().value;
-          if (first) ourSentIdsRef.current.delete(first);
-        }
-      }
-      lastSentByJidMap.set(jid, textForSend);
-      pushExchange(jid, text, textForSend);
-      const ts = Date.now();
-      const exchange = { user: text, assistant: textForSend, timestampMs: ts, jid };
-      if (bioOpts.logExchange) {
-        bioOpts.logExchange(exchange);
-      } else {
-        if (isTelegramGroupJid(jid)) {
-          try {
-            appendGroupExchange(getWorkspaceDir(), jid, exchange);
-          } catch (err) {
-            console.error('[group-chat-log] write failed:', err.message);
-          }
-        } else {
-          const memoryConfig = getMemoryConfig();
-          if (memoryConfig) {
-            indexChatExchange(memoryConfig, exchange).catch((err) =>
-              console.error('[memory] auto-index failed:', err.message)
-            );
-          }
-        }
-      }
-      console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
-      if (bioOpts.pendingBioConfirmJids != null && !isBioSet()) {
+    const isGroupNoReply = bioOpts.groupNonOwner && !bioOpts.groupMentioned &&
+      (!textForSend || !textForSend.trim() || /^\[NO_REPLY\]\s*$/i.test(textForSend.trim()));
+    if (!isGroupNoReply) {
+      let voiceBuffer = null;
+      if (bioOpts.replyWithVoice && textForSend && textForSend.trim()) {
         try {
-          await sock.sendMessage(jid, { text: BIO_CONFIRM_PROMPT });
-          bioOpts.pendingBioConfirmJids.add(jid);
-        } catch (_) {
-          if (isTelegramChatId(jid)) addPendingTelegram(jid, BIO_CONFIRM_PROMPT);
-          else pendingReplies.push({ jid, text: BIO_CONFIRM_PROMPT });
-          bioOpts.pendingBioConfirmJids.add(jid);
+          const speechConfig = getSpeechConfig();
+          if (speechConfig?.elevenLabsApiKey) {
+            voiceBuffer = await synthesizeToBuffer(speechConfig.elevenLabsApiKey, textForSend, speechConfig.defaultVoiceId);
+          }
+        } catch (err) {
+          console.error('[speech] synthesize failed:', err.message);
         }
       }
-    } catch (sendErr) {
-      lastSentByJidMap.set(jid, textForSend); // E2E can still assert on intended reply when send fails
-      if (!isTelegramChatId(jid)) {
-        pendingReplies.push({ jid, text: textForSend });
-        console.log('[replied] queued (send failed, will retry after reconnect):', sendErr.message);
-      } else {
-        addPendingTelegram(jid, textForSend);
-        console.log('[replied] Telegram queued (send failed, will retry on next message):', sendErr.message);
+      try {
+        const sent = voiceBuffer
+          ? await sock.sendMessage(jid, isTelegramChatId(jid) ? { voice: voiceBuffer } : { audio: voiceBuffer, ptt: true })
+          : await sock.sendMessage(jid, { text: textForSend });
+        if (sent?.key?.id && ourSentIdsRef?.current) {
+          ourSentIdsRef.current.add(sent.key.id);
+          if (ourSentIdsRef.current.size > MAX_OUR_SENT_IDS) {
+            const first = ourSentIdsRef.current.values().next().value;
+            if (first) ourSentIdsRef.current.delete(first);
+          }
+        }
+        lastSentByJidMap.set(jid, textForSend);
+        pushExchange(jid, text, textForSend);
+        const ts = Date.now();
+        const exchange = { user: text, assistant: textForSend, timestampMs: ts, jid };
+        if (bioOpts.logExchange) {
+          bioOpts.logExchange(exchange);
+        } else {
+          if (isTelegramGroupJid(jid)) {
+            try {
+              appendGroupExchange(getWorkspaceDir(), jid, exchange);
+            } catch (err) {
+              console.error('[group-chat-log] write failed:', err.message);
+            }
+          } else {
+            const memoryConfig = getMemoryConfig();
+            if (memoryConfig) {
+              indexChatExchange(memoryConfig, exchange).catch((err) =>
+                console.error('[memory] auto-index failed:', err.message)
+              );
+            }
+          }
+        }
+        console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
+        if (bioOpts.pendingBioConfirmJids != null && !isBioSet()) {
+          try {
+            await sock.sendMessage(jid, { text: BIO_CONFIRM_PROMPT });
+            bioOpts.pendingBioConfirmJids.add(jid);
+          } catch (_) {
+            if (isTelegramChatId(jid)) addPendingTelegram(jid, BIO_CONFIRM_PROMPT);
+            else pendingReplies.push({ jid, text: BIO_CONFIRM_PROMPT });
+            bioOpts.pendingBioConfirmJids.add(jid);
+          }
+        }
+      } catch (sendErr) {
+        lastSentByJidMap.set(jid, textForSend); // E2E can still assert on intended reply when send fails
+        if (!isTelegramChatId(jid)) {
+          pendingReplies.push({ jid, text: textForSend });
+          console.log('[replied] queued (send failed, will retry after reconnect):', sendErr.message);
+        } else {
+          addPendingTelegram(jid, textForSend);
+          console.log('[replied] Telegram queued (send failed, will retry on next message):', sendErr.message);
+        }
       }
     }
   }
@@ -733,6 +760,7 @@ Do not use asterisks in replies.
         indexChatExchange,
         getWorkspaceDir,
         toUserMessage,
+        getBotUsername: createGetBotUsername(optsTelegramBot),
       };
       optsTelegramBot.on('message', async (msg) => {
         if (isTelegramGroup(msg.chat)) {
@@ -974,6 +1002,7 @@ Do not use asterisks in replies.
       indexChatExchange,
       getWorkspaceDir,
       toUserMessage,
+      getBotUsername: createGetBotUsername(telegramBot),
     };
     telegramBot.on('message', async (msg) => {
       if (isTelegramGroup(msg.chat)) {
