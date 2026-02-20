@@ -37,6 +37,7 @@ import { getOwnerConfig, isOwner } from './lib/owner-config.js';
 import {
   isTelegramGroup,
   isCronIntent,
+  isScanIntent,
   isDrasticIntent,
   isOverRateLimit,
   recordGroupRequest,
@@ -786,6 +787,10 @@ Do not use asterisks in replies.
             await optsTelegramBot.sendMessage(chatId, 'Cron jobs are not allowed for group members.').catch(() => addPendingTelegram(jidKey, 'Cron jobs are not allowed for group members.'));
             return;
           }
+          if (isScanIntent(text)) {
+            await optsTelegramBot.sendMessage(chatId, 'Scanning is not allowed for group members.').catch(() => addPendingTelegram(jidKey, 'Scanning is not allowed for group members.'));
+            return;
+          }
           if (isDrasticIntent(text)) {
             setPendingApproval(ownerCfg.telegramUserId, {
               groupJid: jidKey,
@@ -1130,6 +1135,10 @@ Do not use asterisks in replies.
         }
         if (isCronIntent(text)) {
           await telegramBot.sendMessage(chatId, 'Cron jobs are not allowed for group members.').catch(() => addPendingTelegram(jidKey, 'Cron jobs are not allowed for group members.'));
+          return;
+        }
+        if (isScanIntent(text)) {
+          await telegramBot.sendMessage(chatId, 'Scanning is not allowed for group members.').catch(() => addPendingTelegram(jidKey, 'Scanning is not allowed for group members.'));
           return;
         }
         if (isDrasticIntent(text)) {
