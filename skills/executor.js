@@ -37,6 +37,9 @@ const EXECUTORS = {
   core: executeCore,
 };
 
+/** Core skill (shell commands) is disabled for everyone — not available. */
+const CORE_SKILL_ID = 'core';
+
 /**
  * @param {string} skillId - cron | search | memory
  * @param {object} ctx - storePath, jid, workspaceDir, scheduleOneShot, startCron
@@ -45,6 +48,9 @@ const EXECUTORS = {
  * @returns {Promise<string>}
  */
 export async function executeSkill(skillId, ctx, args, toolName) {
+  if (skillId === CORE_SKILL_ID) {
+    return JSON.stringify({ error: 'The core skill is not available.' });
+  }
   if (ctx.groupNonOwner && SKILLS_NOT_ALLOWED_FOR_GROUP_NON_OWNER.has(skillId)) {
     return JSON.stringify({ error: 'This skill is not allowed for group members.' });
   }

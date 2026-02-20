@@ -40,6 +40,8 @@ import {
   isScanIntent,
   isOverRateLimit,
   recordGroupRequest,
+  shouldGreetMember,
+  recordMemberSeen,
 } from './lib/group-guard.js';
 import { getMemoryConfig } from './lib/memory-config.js';
 import { indexChatExchange } from './lib/memory-index.js';
@@ -491,12 +493,15 @@ Do not use asterisks in replies.
     return /^(y|yes|yeah|yep|sure|ok|okay|1|do it|please|go ahead|sounds good)$/.test(t) || t === 'yup';
   }
 
-  function buildSystemPrompt() {
+  function buildSystemPrompt(opts = {}) {
     ensureSoulMd();
     const timeCtx = getSchedulingTimeContext();
     const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
     const pathsLine = `\n\nCowCode on this system: state dir ${getStateDir()}, workspace ${getWorkspaceDir()}. When the user asks where cowcode is installed or where config is, use the read skill with path \`~/.cowcode/config.json\` (or the state dir path above) to show config and confirm.`;
-    const soulContent = (readWorkspaceMd(SOUL_MD) || DEFAULT_SOUL_CONTENT) + pathsLine;
+    let soulContent = (readWorkspaceMd(SOUL_MD) || DEFAULT_SOUL_CONTENT) + pathsLine;
+    if (opts.groupSenderName) {
+      soulContent += `\n\nYou are in a group chat. The current message was sent by ${opts.groupSenderName}. Messages may be prefixed with "Message from [name] in the group" — that [name] is the sender. Never attribute a request to the bot owner unless the prefix says the bot owner's name. When asked who asked something, name the person from the "Message from [name]" prefix.`;
+    }
     let whoAmIContent = readWorkspaceMd(WHO_AM_I_MD);
     const myHumanContent = readWorkspaceMd(MY_HUMAN_MD);
     if (!whoAmIContent && !myHumanContent) {
@@ -554,7 +559,7 @@ Do not use asterisks in replies.
     const { textToSend } = await runAgentTurn({
       userText: text,
       ctx,
-      systemPrompt: buildSystemPrompt(),
+      systemPrompt: buildSystemPrompt({ groupSenderName: bioOpts.groupSenderName }),
       tools: toolsToUse,
       historyMessages: getLast5Exchanges(jid),
     });
@@ -771,9 +776,12 @@ Do not use asterisks in replies.
         const groupNonOwner = inGroup && !!ownerCfg.telegramUserId && !isOwner(msg.from?.id);
         console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
         const senderName = inGroup && msg.from ? (msg.from.first_name || msg.from.username || 'A group member') : null;
-        const textForAgent = senderName ? `Message from ${senderName} in the group:\n\n${text}` : text;
+        const shouldGreet = inGroup && msg.from?.id != null && shouldGreetMember(String(chatId), msg.from.id);
+        if (inGroup && msg.from?.id != null) recordMemberSeen(String(chatId), msg.from.id);
+        const greetingHint = shouldGreet ? ' [Greet this person — they just started chatting or we haven\'t seen them in the last hour.]' : '';
+        const textForAgent = senderName ? `Message from ${senderName} in the group:${greetingHint}\n\n${text}` : text;
         await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
-        runAgentWithSkills(sock, jidKey, textForAgent, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice, groupNonOwner }).catch((err) => {
+        runAgentWithSkills(sock, jidKey, textForAgent, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice, groupNonOwner, groupSenderName: senderName || undefined }).catch((err) => {
           console.error('Telegram agent error:', err.message);
           const errorText = 'Moo — ' + toUserMessage(err);
           optsTelegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
@@ -1087,9 +1095,12 @@ Do not use asterisks in replies.
       const groupNonOwner = inGroup && !!ownerCfg.telegramUserId && !isOwner(msg.from?.id);
       console.log('[telegram]', String(chatId), text.slice(0, 60) + (text.length > 60 ? '…' : ''));
       const senderName = inGroup && msg.from ? (msg.from.first_name || msg.from.username || 'A group member') : null;
-      const textForAgent = senderName ? `Message from ${senderName} in the group:\n\n${text}` : text;
+      const shouldGreet = inGroup && msg.from?.id != null && shouldGreetMember(String(chatId), msg.from.id);
+      if (inGroup && msg.from?.id != null) recordMemberSeen(String(chatId), msg.from.id);
+      const greetingHint = shouldGreet ? ' [Greet this person — they just started chatting or we haven\'t seen them in the last hour.]' : '';
+      const textForAgent = senderName ? `Message from ${senderName} in the group:${greetingHint}\n\n${text}` : text;
       await runPastDueOneShots().catch((e) => console.error('[cron] runPastDueOneShots:', e.message));
-      runAgentWithSkills(telegramSock, jidKey, textForAgent, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice, groupNonOwner }).catch((err) => {
+      runAgentWithSkills(telegramSock, jidKey, textForAgent, lastSentByJid, jidKey, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, replyWithVoice, groupNonOwner, groupSenderName: senderName || undefined }).catch((err) => {
         console.error('Telegram agent error:', err.message);
         const errorText = 'Moo — ' + toUserMessage(err);
         telegramBot.sendMessage(chatId, errorText).catch(() => addPendingTelegram(String(chatId), errorText));
