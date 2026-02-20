@@ -152,9 +152,19 @@
     .skill-doc-inline.open { display: block; }
     .skill-doc-inline h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
     .skill-doc-inline .skill-doc-textarea { width: 100%; min-height: 16rem; background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.85rem; resize: vertical; }
-    .skill-item.disabled-in-group { opacity: 0.75; }
-    .skill-item.disabled-in-group .skill-id::after { content: ' (not available in groups)'; font-weight: normal; color: var(--muted); font-size: 0.8rem; }
     code { font-size: 0.85em; color: var(--muted); }
+    .groups-layout { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .groups-sidebar { min-width: 14rem; max-width: 18rem; }
+    .groups-ul { list-style: none; margin: 0; padding: 0; }
+    .groups-ul li { margin: 0.25rem 0; }
+    .groups-ul a, .groups-ul button.link { background: none; border: none; font: inherit; color: var(--accent); cursor: pointer; padding: 0.35rem 0; text-align: left; width: 100%; }
+    .groups-ul a:hover, .groups-ul button.link:hover { text-decoration: underline; }
+    .groups-ul li.selected a, .groups-ul li.selected button.link { color: var(--text); font-weight: 500; }
+    .groups-main { flex: 1; min-width: 20rem; }
+    .groups-detail-body .detail-row { margin-bottom: 0.75rem; }
+    .groups-detail-body .detail-label { font-size: 0.8rem; color: var(--muted); }
+    .groups-detail-body .detail-value { font-size: 0.9rem; word-break: break-all; }
+    .groups-detail-body .log-files { font-size: 0.85rem; max-height: 12rem; overflow-y: auto; }
   </style>
 </head>
 <body>
@@ -163,6 +173,7 @@
     <a href="#status" data-page="status" class="active">Status</a>
     <a href="#crons" data-page="crons">Crons</a>
     <a href="#skills" data-page="skills">Skills</a>
+    <a href="#groups" data-page="groups">Groups</a>
     <a href="#llm" data-page="llm">LLM</a>
     <a href="#config" data-page="config">Config</a>
   </nav>
@@ -202,11 +213,27 @@
       <div id="skills-list"></div>
       <button id="skills-save" style="display:none;">Save enabled/disabled</button>
     </div>
-    <div class="card">
-      <h2 style="margin:0 0 0.75rem 0; font-size:1rem;">Group skills</h2>
-      <p class="skill-meta" style="margin:0 0 0.75rem 0;">Enable or disable skills for group chats. Core, read, and cron are not available in groups. Stored in <code>~/.cowcode/group/config.json</code>.</p>
-      <div id="group-skills-list"></div>
-      <button id="group-skills-save" style="display:none;">Save group skills</button>
+  </div>
+
+  <div id="page-groups" class="page">
+    <div class="groups-layout">
+      <div class="groups-sidebar card">
+        <h2 style="margin:0 0 0.75rem 0; font-size:1rem;">Groups</h2>
+        <p class="skill-meta" style="margin:0 0 0.5rem 0;">Default settings apply to all groups. Select a group for details.</p>
+        <ul id="groups-list" class="groups-ul"></ul>
+      </div>
+      <div class="groups-main">
+        <div id="groups-detail-default" class="groups-detail card">
+          <h2 style="margin:0 0 0.75rem 0; font-size:1rem;">Default group settings</h2>
+          <p class="skill-meta" style="margin:0 0 0.75rem 0;">Enable or disable skills for group chats. Core, read, and cron are available but not enabled by default. Stored in <code>~/.cowcode/group/config.json</code>.</p>
+          <div id="group-skills-list"></div>
+          <button id="group-skills-save" style="display:none;">Save group skills</button>
+        </div>
+        <div id="groups-detail-one" class="groups-detail card" style="display:none;">
+          <h2 style="margin:0 0 0.75rem 0; font-size:1rem;" id="groups-detail-title">Group</h2>
+          <div id="groups-detail-body"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -242,7 +269,8 @@
       if (page) page.classList.add('active');
       if (link) link.classList.add('active');
       if (name === 'crons') fetchCrons();
-      if (name === 'skills') { fetchSkills(); fetchGroupSkills(); }
+      if (name === 'skills') fetchSkills();
+      if (name === 'groups') { fetchGroups(); fetchGroupSkills(); }
       if (name === 'llm') renderLlmForm();
       if (name === 'config') fetchConfig();
     }
@@ -436,15 +464,10 @@
       const list = d.skills || [];
       const el = document.getElementById('group-skills-list');
       el.innerHTML = list.map(s => {
-        const disabledInGroup = s.disabledInGroups === true;
-        const checked = disabledInGroup ? false : currentGroupEnabled.includes(s.id);
+        const checked = currentGroupEnabled.includes(s.id);
         const desc = (s.description || '').trim();
         const descHtml = desc ? '<div class="skill-desc">' + escapeHtml(desc) + '</div>' : '';
-        const itemClass = disabledInGroup ? 'skill-item disabled-in-group' : 'skill-item';
-        const cb = disabledInGroup
-          ? '<span class="skill-meta">Not available in groups</span>'
-          : '<label onclick="event.stopPropagation()"><input type="checkbox" data-id="' + escapeHtml(s.id) + '"' + (checked ? ' checked' : '') + '> Enabled</label>';
-        return '<div class="' + itemClass + '"><div class="skill-row"><div><span class="skill-id">' + escapeHtml(s.id) + '</span>' + descHtml + '</div>' + cb + '</div></div>';
+        return '<div class="skill-item"><div class="skill-row"><div><span class="skill-id">' + escapeHtml(s.id) + '</span>' + descHtml + '</div><label onclick="event.stopPropagation()"><input type="checkbox" data-id="' + escapeHtml(s.id) + '"' + (checked ? ' checked' : '') + '> Enabled</label></div></div>';
       }).join('');
       el.querySelectorAll('input[type="checkbox"]').forEach(cb => {
         cb.addEventListener('change', () => { groupSkillsDirty = true; document.getElementById('group-skills-save').style.display = 'block'; });
@@ -459,6 +482,56 @@
       const r = await fetch(API + '/api/group/skills', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
       if (r.ok) { groupSkillsDirty = false; document.getElementById('group-skills-save').style.display = 'none'; }
     });
+
+    let selectedGroupId = 'default';
+
+    async function fetchGroups() {
+      const r = await fetch(API + '/api/groups');
+      const d = await r.json();
+      const groups = d.groups || [];
+      const ul = document.getElementById('groups-list');
+      ul.innerHTML = '<li class="' + (selectedGroupId === 'default' ? 'selected' : '') + '"><button type="button" class="link" data-id="default">Default settings</button></li>' +
+        groups.map(g => '<li class="' + (selectedGroupId === g.id ? 'selected' : '') + '"><button type="button" class="link" data-id="' + escapeHtml(g.id) + '">' + escapeHtml(g.label) + '</button></li>').join('');
+      ul.querySelectorAll('button.link').forEach(btn => {
+        btn.addEventListener('click', () => selectGroup(btn.dataset.id));
+      });
+      selectGroup(selectedGroupId);
+    }
+
+    function selectGroup(id) {
+      selectedGroupId = id;
+      document.querySelectorAll('#groups-list li').forEach(li => {
+        li.classList.toggle('selected', li.querySelector('button.link').dataset.id === id);
+      });
+      if (id === 'default') {
+        document.getElementById('groups-detail-default').style.display = 'block';
+        document.getElementById('groups-detail-one').style.display = 'none';
+        return;
+      }
+      document.getElementById('groups-detail-default').style.display = 'none';
+      document.getElementById('groups-detail-one').style.display = 'block';
+      document.getElementById('groups-detail-title').textContent = 'Group ' + escapeHtml(id);
+      fetchGroupDetail(id);
+    }
+
+    async function fetchGroupDetail(id) {
+      const bodyEl = document.getElementById('groups-detail-body');
+      bodyEl.innerHTML = '<p class="empty">Loading…</p>';
+      try {
+        const r = await fetch(API + '/api/groups/' + encodeURIComponent(id));
+        if (!r.ok) { bodyEl.innerHTML = '<p class="error">Group not found.</p>'; return; }
+        const d = await r.json();
+        bodyEl.innerHTML =
+          '<div class="detail-row"><div class="detail-label">Group ID</div><div class="detail-value">' + escapeHtml(d.id) + '</div></div>' +
+          '<div class="detail-row"><div class="detail-label">Chat log path</div><div class="detail-value">' + escapeHtml(d.chatLogPath || '') + '</div></div>' +
+          '<div class="detail-row"><div class="detail-label">Uses default group settings</div><div class="detail-value">' + (d.usesDefaultSettings ? 'Yes' : 'No') + '</div></div>' +
+          (d.logFiles && d.logFiles.length > 0
+            ? '<div class="detail-row"><div class="detail-label">Log files (' + d.logFiles.length + ')</div><div class="detail-value log-files"><ul style="margin:0; padding-left:1.25rem;">' + d.logFiles.map(f => '<li>' + escapeHtml(f) + '</li>').join('') + '</ul></div></div>'
+            : '<div class="detail-row"><div class="detail-label">Log files</div><div class="detail-value empty">None yet.</div></div>');
+      } catch (e) {
+        bodyEl.innerHTML = '<p class="error">Failed to load group.</p>';
+      }
+    }
 
     async function fetchConfig() {
       const r = await fetch(API + '/api/config');

@@ -10,7 +10,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
-import { getConfigPath, getCronStorePath, getStateDir, getGroupConfigPath } from '../lib/paths.js';
+import { getConfigPath, getCronStorePath, getStateDir, getGroupConfigPath, getWorkspaceDir } from '../lib/paths.js';
 import { getResolvedTimezone, getResolvedTimeFormat } from '../lib/timezone.js';
 import { loadStore } from '../cron/store.js';
 import { DEFAULT_ENABLED } from '../skills/loader.js';
@@ -243,8 +243,7 @@ app.patch('/api/skills', (req, res) => {
   }
 });
 
-// Group skills: same skill list, enabled from group/config.json (core, read, cron not available in groups)
-const GROUP_SKILLS_EXCLUDED = new Set(['core', 'read', 'cron']);
+// Group skills: core, read, cron are available but not enabled by default (no stripping on save)
 
 app.get('/api/group/skills', (_req, res) => {
   try {
@@ -255,9 +254,8 @@ app.get('/api/group/skills', (_req, res) => {
       id,
       enabled: enabled.includes(id),
       description: getSkillDescription(id),
-      disabledInGroups: GROUP_SKILLS_EXCLUDED.has(id),
     }));
-    res.json({ skills: list, enabled: enabled.filter((id) => !GROUP_SKILLS_EXCLUDED.has(id)) });
+    res.json({ skills: list, enabled });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -270,12 +268,53 @@ app.patch('/api/group/skills', (req, res) => {
       res.status(400).json({ error: 'enabled must be an array' });
       return;
     }
-    const filtered = enabled.filter((id) => !GROUP_SKILLS_EXCLUDED.has(id));
     const config = loadGroupConfig();
     if (!config.skills) config.skills = {};
-    config.skills.enabled = filtered;
+    config.skills.enabled = enabled;
     saveGroupConfig(config);
-    res.json({ enabled: filtered });
+    res.json({ enabled });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const GROUP_CHAT_LOG_DIR = 'group-chat-log';
+
+app.get('/api/groups', (_req, res) => {
+  try {
+    const base = join(getWorkspaceDir(), GROUP_CHAT_LOG_DIR);
+    if (!existsSync(base)) {
+      res.json({ groups: [] });
+      return;
+    }
+    const entries = readdirSync(base, { withFileTypes: true });
+    const groups = entries
+      .filter((d) => d.isDirectory())
+      .map((d) => ({ id: d.name, label: d.name }));
+    res.json({ groups });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/groups/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const groupDir = join(getWorkspaceDir(), GROUP_CHAT_LOG_DIR, id);
+    if (!existsSync(groupDir)) {
+      res.status(404).json({ error: 'Group not found' });
+      return;
+    }
+    const files = readdirSync(groupDir, { withFileTypes: true });
+    const logFiles = files.filter((f) => f.isFile() && f.name.endsWith('.jsonl')).map((f) => f.name);
+    logFiles.sort();
+    res.json({
+      id,
+      label: id,
+      chatLogPath: join(getWorkspaceDir(), GROUP_CHAT_LOG_DIR, id),
+      logFiles,
+      usesDefaultSettings: true,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
