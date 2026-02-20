@@ -1,7 +1,7 @@
 /**
  * Central executor: runs tool operations (add, delete, list, etc.) with LLM-provided args.
  * No logic in skill folders; tool schemas come from tools.json + config.
- * When ctx.groupNonOwner is true (non-owner in a Telegram group), certain skills are not allowed.
+ * When ctx.groupNonOwner is true (any message from a group), certain skills are not allowed for anyone in the group.
  */
 
 import { executeCron } from '../lib/executors/cron.js';
@@ -17,7 +17,7 @@ import { executeApplyPatch } from '../lib/executors/apply-patch.js';
 import { executeCore } from '../lib/executors/core.js';
 import { executeSpeech } from '../lib/executors/speech.js';
 
-/** Skills that group members (non-owners) cannot use. Owner and private chats are not restricted. Exported for loader to hide from group tool list. */
+/** Skills that no one in a group can use (group-only restriction; private chats and DMs are not restricted). Exported for loader to hide from group tool list. */
 export const SKILLS_NOT_ALLOWED_FOR_GROUP_NON_OWNER = new Set([
   'core', 'read', 'write', 'edit', 'apply-patch', 'browse', 'cron', 'gog',
 ]);
