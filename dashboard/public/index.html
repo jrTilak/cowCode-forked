@@ -469,24 +469,24 @@
     let selectedGroupId = 'default';
 
     async function fetchGroups() {
+      var ul = document.getElementById('groups-list');
+      var oldHint = document.getElementById('groups-path-hint');
+      if (oldHint) oldHint.remove();
       var r = await fetch(API + '/api/groups');
-      var d = await r.json();
+      var d = await r.json().catch(function () { return {}; });
       var groups = d.groups || [];
       if (d.error) console.error('[groups]', d.error);
-      var ul = document.getElementById('groups-list');
       ul.innerHTML =
         '<li class="' + (selectedGroupId === 'default' ? 'selected' : '') + '"><button type="button" class="link" data-id="default">Default settings</button></li>' +
         groups.map(function (g) {
           return '<li class="' + (selectedGroupId === g.id ? 'selected' : '') + '"><button type="button" class="link" data-id="' + escapeHtml(g.id) + '">' + escapeHtml(g.label) + '</button></li>';
         }).join('');
-      var oldHint = document.getElementById('groups-path-hint');
-      if (oldHint) oldHint.remove();
-      if (groups.length === 0 && d._path) {
+      if (groups.length === 0 && (d._path || d.error)) {
         var hint = document.createElement('p');
         hint.id = 'groups-path-hint';
         hint.className = 'skill-meta';
         hint.style.marginTop = '0.5rem';
-        hint.textContent = 'No groups yet. Server reading: ' + d._path;
+        hint.textContent = d.error ? ('Error: ' + d.error + (d._path ? ' (path: ' + d._path + ')') : '') : ('No groups yet. Server reading: ' + d._path);
         ul.parentNode.insertBefore(hint, ul.nextSibling);
       }
       ul.querySelectorAll('button.link').forEach(function (btn) {
