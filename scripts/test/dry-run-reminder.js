@@ -49,10 +49,7 @@ function section(title) {
 
 function step1BuildPayload(userMessage) {
   const { skillDocs, runSkillTool } = getSkillContext();
-  const skillDocsBlock = skillDocs
-    ? '\n\n# Available skills\n\n' + skillDocs
-    : '';
-  const systemPrompt = getScheduleSystemPrompt() + skillDocsBlock;
+  const systemPrompt = getScheduleSystemPrompt();
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -69,8 +66,8 @@ function step1Print(userMessage) {
   const { messages, tools, systemPrompt, skillDocs } = step1BuildPayload(userMessage);
 
   console.log('\nFiles / sources used:');
-  console.log('  - index.js: builds systemPrompt (getScheduleSystemPrompt + skillDocsBlock)');
-  console.log('  - skills/loader.js: getSkillContext() → skillDocs from skills/cron/SKILL.md, skills/search/SKILL.md, skills/memory/SKILL.md; runSkillTool = single tool "run_skill"');
+  console.log('  - System prompt = role only (schedule + timezone). Skill docs are in the run_skill tool description, not in system.');
+  console.log('  - skills/loader.js: getSkillContext() → runSkillTool with skill docs in tool description; single tool "run_skill".');
   console.log('  - No memory file is injected into the prompt; memory skill is available for the LLM to call if needed.\n');
 
   console.log('System prompt (first 800 chars):');

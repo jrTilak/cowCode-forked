@@ -375,7 +375,7 @@ async function main() {
     ? `${config.models.length} models (priority): ${config.models.map(m => m.model).join(' → ')}`
     : { baseUrl: first.baseUrl, model: first.model });
   const skillsEnabled = getSkillsEnabled();
-  const { skillDocs, runSkillTool } = getSkillContext();
+  const { runSkillTool } = getSkillContext();
   console.log('Skills enabled:', skillsEnabled?.length ? skillsEnabled.join(', ') : 'cron (default)');
 
   const MAX_REPLIED_IDS = 500;
@@ -410,10 +410,6 @@ async function main() {
   const useSkills = Array.isArray(skillsEnabled) && skillsEnabled.length > 0 && allTools.length > 0;
   const toolsToUse = useSkills ? allTools : [];
   const useTools = toolsToUse.length > 0;
-
-  const skillDocsBlock = skillDocs
-    ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}`
-    : '';
 
   const WHO_AM_I_MD = 'WhoAmI.md';
   const MY_HUMAN_MD = 'MyHuman.md';
@@ -536,8 +532,6 @@ async function main() {
       });
       if (groupBlock) soulContent += '\n\n' + groupBlock;
     }
-    const effectiveSkillDocsBlock = opts.skillDocsBlock != null ? opts.skillDocsBlock : skillDocsBlock;
-    const effectiveUseTools = opts.useTools != null ? opts.useTools : useTools;
     let whoAmIContent = forGroup ? readGroupMd(WHO_AM_I_MD, groupJid) : readWorkspaceMd(WHO_AM_I_MD);
     const myHumanContent = forGroup ? readGroupMd(MY_HUMAN_MD, groupJid) : readWorkspaceMd(MY_HUMAN_MD);
     if (!forGroup && !whoAmIContent && !myHumanContent) {
@@ -574,9 +568,7 @@ async function main() {
       }
     }
     const base = soulContent + identityBlock;
-    return effectiveUseTools
-      ? base + timeBlock + effectiveSkillDocsBlock
-      : base + `\n\n${timeCtx.timeContextLine}`;
+    return base + timeBlock;
   }
 
   async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef, bioOpts = {}) {
@@ -594,12 +586,9 @@ async function main() {
     };
     const isGroupNonOwner = !!bioOpts.groupNonOwner;
     const { toolsForRequest, systemPromptOpts } = isGroupNonOwner
-      ? (() => {
+        ? (() => {
           const groupJid = jid;
-          const { skillDocs: groupSkillDocs, runSkillTool: groupTools } = getSkillContext({ groupNonOwner: true, groupJid });
-          const groupSkillDocsBlock = groupSkillDocs
-            ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${groupSkillDocs}`
-            : '';
+          const { runSkillTool: groupTools } = getSkillContext({ groupNonOwner: true, groupJid });
           return {
             toolsForRequest: groupTools,
             systemPromptOpts: {
@@ -607,8 +596,6 @@ async function main() {
               groupJid,
               groupMentioned: !!bioOpts.groupMentioned,
               groupNonOwner: !!bioOpts.groupNonOwner,
-              skillDocsBlock: groupSkillDocsBlock,
-              useTools: groupTools.length > 0,
             },
           };
         })()

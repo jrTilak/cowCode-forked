@@ -66,6 +66,8 @@ export function getSkillContext(options = {}) {
   }
 
   const skillDocs = parts.length ? parts.join('\n\n---\n\n') : '';
+  const runSkillIntro =
+    'Run a skill. Choose "skill" and "arguments" from the available skills below. Set "command" or "arguments.action" to the operation name (e.g. search, list, add).';
   const runSkillTool =
     available.length === 0
       ? []
@@ -74,7 +76,9 @@ export function getSkillContext(options = {}) {
             type: 'function',
             function: {
               name: 'run_skill',
-              description: 'Run skills that are needed and available. The command name is the operation: set "command" to the operation name (e.g. search, navigate, list, add, remove) or set "arguments.action" to the same. Set "skill" and "arguments" as described in each skill.',
+              description: skillDocs
+                ? runSkillIntro + '\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n' + skillDocs
+                : runSkillIntro,
               parameters: {
                 type: 'object',
                 properties: {

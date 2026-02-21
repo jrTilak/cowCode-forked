@@ -17,13 +17,8 @@ dotenv.config({ path: getEnvPath() });
 
 const CRON_EXECUTOR_RULE = `This is a cron executor run: you are fulfilling a reminder the user already set. They chose the content when they created the reminder—do NOT ask for clarification (e.g. weather location, "current or 7-day?", or news scope). Use the search skill with concrete queries: for weather use e.g. "current weather Enola PA" or "weather [place name]"; for "top N news" use search with query "top N news" (e.g. "top 5 news") to fetch real headlines with links, not a list of source websites. Execute and return the combined result.`;
 
-function buildCronSystemPrompt(skillDocs, runSkillTool) {
-  const base = `You are CowCode. Reply concisely. Use run_skill when you need search, browse, vision, cron, or memory. Do not use <think> or any thinking/reasoning blocks—output only your final reply.\n\n${getTimezoneContextLine()}\n\n# Cron executor\n${CRON_EXECUTOR_RULE}`;
-  const tools = Array.isArray(runSkillTool) && runSkillTool.length > 0;
-  const skillBlock = tools && skillDocs
-    ? `\n\n# Available skills (use run_skill with skill and arguments)\n\n${skillDocs}`
-    : '';
-  return base + skillBlock;
+function buildCronSystemPrompt() {
+  return `You are CowCode. Reply concisely. Use run_skill when you need search, browse, vision, cron, or memory. Do not use <think> or any thinking/reasoning blocks—output only your final reply.\n\n${getTimezoneContextLine()}\n\n# Cron executor\n${CRON_EXECUTOR_RULE}`;
 }
 
 async function main() {
@@ -40,12 +35,12 @@ async function main() {
   const workspaceDir = payload.workspaceDir && String(payload.workspaceDir).trim() || getWorkspaceDir();
   const noop = () => {};
   const ctx = { storePath, jid, workspaceDir, scheduleOneShot: noop, startCron: noop };
-  const { skillDocs, runSkillTool } = getSkillContext();
+  const { runSkillTool } = getSkillContext();
   const toolsToUse = Array.isArray(runSkillTool) && runSkillTool.length > 0 ? runSkillTool : [];
   const { textToSend } = await runAgentTurn({
     userText: message,
     ctx,
-    systemPrompt: buildCronSystemPrompt(skillDocs, runSkillTool),
+    systemPrompt: buildCronSystemPrompt(),
     tools: toolsToUse,
     historyMessages: [],
   });
