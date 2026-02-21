@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * CLI entry: auth, moo start/stop/status/restart, or update.
- * Usage: cowcode auth | cowcode moo start|stop|status|restart | cowcode update [--force]
+ * Usage: cowcode auth | cowcode moo start|stop|status|restart | cowcode logs | cowcode update [--force]
  */
 
 import { spawn, spawnSync, execSync } from 'child_process';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INSTALL_DIR = process.env.COWCODE_INSTALL_DIR
@@ -141,8 +141,27 @@ if (sub === 'moo') {
     cwd: INSTALL_DIR,
   });
   child.on('close', (code) => process.exit(code ?? 0));
+} else if (sub === 'logs') {
+  const stateDir = process.env.COWCODE_STATE_DIR || join(homedir(), '.cowcode');
+  const logPath = join(stateDir, 'daemon.log');
+  if (process.platform === 'win32') {
+    const child = spawn('pm2', ['logs', 'cowcode'], {
+      stdio: 'inherit',
+      env: process.env,
+      cwd: INSTALL_DIR,
+    });
+    child.on('close', (code) => process.exit(code ?? 0));
+  } else {
+    if (!existsSync(logPath)) {
+      console.error('cowCode: no log file yet. Start the bot with: cowcode moo start');
+      process.exit(1);
+    }
+    const child = spawn('tail', ['-f', logPath], { stdio: 'inherit' });
+    child.on('close', (code) => process.exit(code ?? 0));
+  }
 } else {
   console.log('Usage: cowcode moo start | stop | status | restart');
+  console.log('       cowcode logs');
   console.log('       cowcode dashboard');
   console.log('       cowcode auth [options]');
   console.log('       cowcode update [--force]');

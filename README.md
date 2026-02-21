@@ -1,53 +1,49 @@
 # cowCode
 
-Private AI bot for **WhatsApp and Telegram**.
+<div align="center">
+  <img width="320" height="320" alt="cowCode" src="https://github.com/user-attachments/assets/7d245e10-8172-4956-bc29-aaba9e30aa10" />
+</div>
 
-Runs **on your own computer**.
-Uses your **local or cloud LLM**.
-Nothing is sent anywhere unless you configure it.
+**cowCode - your private AI companion**
 
-Simple. Secure. Direct.
+🔒 Full control | 🖥 Runs on your computer | 🚫 No external routing | ⚙️ You decide what connects
 
-You message the bot.
-It replies.
 
 ---
 
-# 🚀 Install (Do This First)
+<table style="table-layout: fixed; width: 100%;">
+<tr>
+<th style="width: 33%; text-align: left;">Install - Mac | Linux | Windows</th>
+<th style="width: 33%; text-align: left;">Start the Bot - Mac | Linux | Windows</th>
+<th style="width: 33%; text-align: left;">Other commands - Mac | Linux | Windows</th>
+</tr>
+<tr>
+<td style="width: 33%; overflow-wrap: break-word; word-break: break-all; vertical-align: top;">
 
-> **Windows users:**  
-> Use **Git Bash** for all commands.  
-> If you don't have it, [download and install Git Bash here](https://gitforwindows.org/).  
-> Also, make sure [Node.js](https://nodejs.org/) is installed and available in your PATH.
+<pre style="white-space: pre-wrap; word-break: break-all;"><code>curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh | bash</code></pre>
 
-## 1️⃣ One Command Install
+<strong>Windows:</strong> Use <strong>Git Bash</strong> for all commands. Install <a href="https://gitforwindows.org/">Git Bash</a> if needed and <a href="https://nodejs.org/">Node.js</a> (in PATH).
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh | bash
-```
+</td>
+<td style="width: 33%; vertical-align: top;">
 
-That's it.
+<pre><code>cowcode moo start</code></pre>
 
----
+You can close the terminal.<br>It keeps running.
 
-## 2️⃣ Start the Bot
+</td>
+<td style="width: 33%; vertical-align: top;">
 
-```bash
-cowcode moo start
-```
+<ul>
+<li><code>cowcode update</code> - get the latest version</li>
+<li><code>cowcode uninstall</code> - remove cowCode</li>
+<li><code>cowcode logs</code> - view bot logs</li>
+<li><code>cowcode dashboard</code> - open the dashboard</li>
+</ul>
 
-It runs in the background.
-
-You can close the terminal.
-It keeps running.
-
-> **Windows users:**  
-> To see logs, run:  
-> ```bash
-> pm2 logs cowcode
-> ```
-
-<img width="1024" height="1024" alt="ChatGPT Image Feb 16, 2026, 11_19_56 AM" src="https://github.com/user-attachments/assets/7d245e10-8172-4956-bc29-aaba9e30aa10" />
+</td>
+</tr>
+</table>
 
 ---
 
@@ -62,50 +58,6 @@ It keeps running.
 Your AI.
 Your machine.
 Your control.
-
----
-
-# 💬 How It Works
-
-Choose one or both:
-
-* WhatsApp
-* Telegram
-
-You chat normally.
-The bot replies in that same chat.
-
----
-
-## WhatsApp
-
-Open WhatsApp →
-Message yourself →
-Send a message →
-Bot replies there.
-
----
-
-## Telegram
-
-Message your Telegram bot.
-Bot replies instantly.
-
-You can use both at the same time.
-
-Reminders stay on the same channel you created them.
-
----
-
-# 🔄 Update
-
-Get latest version anytime:
-
-```bash
-cowcode update
-```
-
-Your config, auth, and skills stay safe. No fresh install needed. New default skills (e.g. browse, vision, memory, speech) are added automatically on next start. If you use a text-only LLM and want image reading, re-run setup to configure the vision fallback. For voice (Whisper + 11Labs), re-run setup to configure the speech APIs.
 
 ---
 
@@ -127,60 +79,18 @@ Everything stays on your computer.
 
 ---
 
-# ➕ Add Telegram Later
-
-Add this to:
-
-```
-~/.cowcode/.env
-```
-
-```
-TELEGRAM_BOT_TOKEN=your_token_here
-```
-
-Then:
-
-```bash
-cowcode moo start
-```
-
-**Group authority (groups only)** — In **group** chats (not one-on-one), you can set a **bot owner** (the person who set up/controls the bot). Authority is **not** based on Telegram group admin or group creator — only on config.
-
-* **Drastic actions** (run commands, edit files, browse the web, schedule reminders, etc.) require the **bot owner** to approve. The bot owner gets a DM; they reply `/approve` or `/deny`.
-* **Rate limit** — Too many requests from the group in a short time triggers a cooldown message.
-
-Set the **bot owner’s** Telegram user ID in config (get it from [@userinfobot](https://t.me/userinfobot)):
-
-```json
-"owner": { "telegramUserId": 123456789 }
-```
-
-One-on-one chats with the bot are unchanged: no approval or rate limits.
-
-**Group isolation** — In groups, the bot keeps **separate** history, logs, and memory so they never pollute your main data: in-memory conversation context is per group (by chat id), group chats are logged only to `workspace/group-chat-log/<group-id>/`, and group exchanges are **not** indexed into the main memory (so "Remember what we said?" in private never sees group conversations).
-
----
-
-# ➕ Add WhatsApp Later
-
-```bash
-cowcode auth
-cowcode moo start
-```
-
----
-
 # 🧠 What You Can Say
 
-* remind me in 5 minutes
-* search for AI trends
-* summarize my notes
-* list my reminders
-* open https://example.com and tell me what’s there
-* go to that URL, click the button, and screenshot the page
+| Reminders & time | Search & browse | Vision & pages | Memory & files |
+|------------------|-----------------|----------------|-----------------|
+| remind me in 5 minutes | search for AI trends | describe what's on that page | summarize my notes |
+| remind me tomorrow at 9am | what's the weather | show me what you see (webcam) | what did we decide yesterday? |
+| every Monday at 8am remind me to standup | open example.com and tell me what's there | screenshot the page | what did I note about the project? |
+| list my reminders | go to that URL, click the button | describe this image | read main.py |
+| cancel reminder number 2 | fill the form and submit | what's in the room? | save this to notes.md |
+| set a reminder in 2 hours for groceries | find news about X | take a screenshot | in config.json replace X with Y |
+| what's scheduled? | scroll down the page | what do you see? | list files in my workspace |
 
-**Search** finds info (text in, text out). **Browse** controls a local headless browser: navigate URLs, click, scroll, fill forms, take screenshots. **Vision** reads images: when you send a photo in chat, when the agent has an image path (e.g. from a browse screenshot), or from the **live webcam** ("Show me what you see" → describes the room). Built-in chaining: screenshot → vision → act (no need to say "describe this then click"). Cron, search, browse, and vision are enabled by default.
 
 ---
 
@@ -189,103 +99,6 @@ cowcode moo start
 * Node.js 18+
 * Local LLM running (LM Studio, Ollama, etc.)
 * Or cloud API key
-
----
-
-# 🧩 Optional Configuration
-
-File:
-
-```
-~/.cowcode/config.json
-```
-
-During setup you choose a **cloud LLM** (OpenAI, Grok, or Anthropic) and a **model version** (e.g. GPT-4o, Claude 3.5 Sonnet). The installer offers recommended/latest options per provider.
-
-Local models are tried first.
-
-Cloud models run only if configured.
-
----
-
-# 📧 Google Workspace (gog Skill)
-
-Install the `gog` CLI and complete OAuth:
-
-```bash
-gog auth credentials /path/to/client_secret.json
-gog auth add you@gmail.com --services gmail,calendar,drive,contacts,sheets,docs
-gog auth list
-```
-
-Enable the skill and set a default account (optional):
-
-```json
-"skills": {
-	"enabled": ["cron", "search", "browse", "vision", "memory", "gog"],
-	"gog": { "account": "you@gmail.com" }
-}
-```
-
-For automation, use `--json` and `--no-input`. The assistant will ask for confirmation before sending mail or creating calendar events.
-
----
-
-# ⏰ Reminders
-
-Example:
-
-remind me to call John in 10 minutes
-
-Stored locally:
-
-```
-~/.cowcode/cron/jobs.json
-```
-
----
-
-# 🧠 Memory (Optional)
-
-**Chat history baked in** — "Remember what we said yesterday?" pulls from logs. **Auto-indexing** — every message you send gets embedded; no manual "moo index."
-
-Add notes in `~/.cowcode/workspace/` (e.g. `MEMORY.md`, `memory/*.md`). Conversations are stored in `workspace/chat-log/` and indexed automatically. Ask: *what did I note about the project?* or *what did we decide yesterday?* — the bot searches both notes and chat history.
-
----
-
-# 📁 File skills (optional, not enabled by default)
-
-These skills live in the skills section but are **off by default**. Add them to `skills.enabled` in config if you want the bot to read, write, or edit files and apply patches.
-
-| Skill | What it does |
-|-------|----------------|
-| **read** | Peek a file: "read surface main.py" → returns every line. No changes. |
-| **write** | Create or overwrite a file: "write hello.txt with hi world". Wholesale replace. |
-| **edit** | Find exact string, replace, save. Fails if no match. e.g. "In Auth.js replace password with token". |
-| **apply-patch** | Git-style patch: feed a diff hunk (lines with `+` add, `-` remove); applies to the file. |
-
-Enable in config:
-
-```json
-"skills": {
-	"enabled": ["cron", "search", "browse", "vision", "memory", "read", "write", "edit", "apply-patch"]
-}
-```
-
-Paths are relative to the workspace (`~/.cowcode/workspace/`) unless absolute.
-
----
-
-# 🛠 Background Service
-
-```bash
-cowcode moo start
-cowcode moo stop
-cowcode moo status
-cowcode moo restart
-```
-
-Runs like a proper system service.
 
 ---
 
