@@ -32,7 +32,7 @@ import { startCron, stopCron, scheduleOneShot, runPastDueOneShots } from './cron
 import { getSkillsEnabled, getSkillContext, DEFAULT_ENABLED } from './skills/loader.js';
 import { initBot, createTelegramSock, isTelegramChatId, isTelegramGroupJid } from './lib/telegram.js';
 import { isWhatsAppGroupJid } from './lib/whatsapp.js';
-import { addPending as addPendingTelegram, flushPending as flushPendingTelegram } from './lib/pending-telegram.js';
+import { addPending as addPendingTelegram, clearPending as clearPendingTelegram } from './lib/pending-telegram.js';
 import { getChannelsConfig } from './lib/channels-config.js';
 import { getSchedulingTimeContext } from './lib/timezone.js';
 import { getOwnerConfig, isOwner } from './lib/owner-config.js';
@@ -830,7 +830,7 @@ async function main() {
         getSpeechConfig,
         getUploadsDir,
         transcribe,
-        flushPendingTelegram,
+        clearPendingTelegram,
         addPendingTelegram,
         getOwnerConfig,
         isOwner,
@@ -1139,7 +1139,7 @@ async function main() {
       getSpeechConfig,
       getUploadsDir,
       transcribe,
-      flushPendingTelegram,
+      clearPendingTelegram,
       addPendingTelegram,
       getOwnerConfig,
       isOwner,
