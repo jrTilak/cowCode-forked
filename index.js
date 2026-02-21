@@ -747,14 +747,17 @@ async function main() {
           }
         }
         console.log('[replied]', useTools ? '(agent + skills)' : '(chat)');
-        if (bioOpts.pendingBioConfirmJids != null && !isBioSet()) {
+        const alreadySentBioPrompt = bioOpts.bioPromptSentJids?.has(jid);
+        if (bioOpts.pendingBioConfirmJids != null && !isBioSet() && !alreadySentBioPrompt) {
           try {
             await sock.sendMessage(jid, { text: BIO_CONFIRM_PROMPT });
             bioOpts.pendingBioConfirmJids.add(jid);
+            bioOpts.bioPromptSentJids?.add(jid);
           } catch (_) {
             if (isTelegramChatId(jid)) addPendingTelegram(jid, BIO_CONFIRM_PROMPT);
             else pendingReplies.push({ jid, text: BIO_CONFIRM_PROMPT });
             bioOpts.pendingBioConfirmJids.add(jid);
+            bioOpts.bioPromptSentJids?.add(jid);
           }
         }
       } catch (sendErr) {
@@ -822,6 +825,7 @@ async function main() {
       const telegramRepliedIds = new Set();
       const pendingBioJids = new Set();
       const pendingBioConfirmJids = new Set();
+      const bioPromptSentJidsTelegram = new Set();
       const MAX_TELEGRAM_REPLIED = 500;
       const telegramCtx = {
         bot: optsTelegramBot,
@@ -836,6 +840,7 @@ async function main() {
         isOwner,
         pendingBioConfirmJids,
         pendingBioJids,
+        bioPromptSentJids: bioPromptSentJidsTelegram,
         saveBioToConfig,
         telegramRepliedIds,
         MAX_TELEGRAM_REPLIED,
@@ -919,6 +924,7 @@ async function main() {
   const ourSentMessageIds = new Set(); // IDs of messages we sent (to ignore echo in self-chat)
   const pendingBioJids = new Set();
   const pendingBioConfirmJids = new Set();
+  const bioPromptSentJids = new Set(); // only send setup prompt once per chat
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const m of messages ?? []) {
@@ -1110,7 +1116,7 @@ async function main() {
           } catch (_) {}
         }
 
-        runAgentWithSkills(sock, jid, userText, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids }).catch((err) => {
+        runAgentWithSkills(sock, jid, userText, lastSentByJid, selfJid ?? sock.user?.id, { current: ourSentMessageIds }, { pendingBioJids, pendingBioConfirmJids, bioPromptSentJids }).catch((err) => {
           console.error('Background agent error:', err.message);
           const errorText = '[CowCode] Moo — ' + toUserMessage(err);
           sock.sendMessage(jid, { text: errorText }).catch(() => {
@@ -1145,6 +1151,7 @@ async function main() {
       isOwner,
       pendingBioConfirmJids,
       pendingBioJids,
+      bioPromptSentJids,
       saveBioToConfig,
       telegramRepliedIds,
       MAX_TELEGRAM_REPLIED,
