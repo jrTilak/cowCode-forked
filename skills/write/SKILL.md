@@ -1,5 +1,6 @@
 ---
 id: write
+name: Write
 description: Create or replace a file with given content. Wholesale write; overwrites if exists. Use when the user asks to write, create, or save a file.
 ---
 

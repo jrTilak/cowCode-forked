@@ -1,5 +1,6 @@
 ---
 id: speech
+name: Speech
 description: Voice-to-text (Whisper) and text-to-voice (11Labs). Use when transcribing audio, converting speech to text, or generating spoken audio from text. Commands: transcribe, synthesize.
 ---
 

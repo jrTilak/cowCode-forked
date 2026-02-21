@@ -1,5 +1,6 @@
 ---
 id: vision
+name: Vision
 description: Describe or analyze an image using a vision-capable model. Built-in chaining: screenshot → vision → act. Live camera: image "webcam" or source "webcam". Image: file path (browse screenshot, user upload), URL, or webcam. See SKILL.md.
 ---
 

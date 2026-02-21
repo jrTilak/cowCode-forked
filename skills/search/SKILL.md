@@ -1,5 +1,6 @@
 ---
 id: search
+name: Search
 description: Search the web or fetch a URL. Actions: search (query), navigate (url). See skill.md for arguments.
 ---
 

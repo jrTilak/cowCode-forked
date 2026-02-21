@@ -1,5 +1,6 @@
 ---
 id: browse
+name: Browse
 description: Local browser control: navigate, click, scroll, fill forms, screenshot. Uses Playwright (Chromium). See SKILL.md for arguments.
 ---
 

@@ -375,7 +375,6 @@ async function main() {
     ? `${config.models.length} models (priority): ${config.models.map(m => m.model).join(' → ')}`
     : { baseUrl: first.baseUrl, model: first.model });
   const skillsEnabled = getSkillsEnabled();
-  const { runSkillTool } = getSkillContext();
   console.log('Skills enabled:', skillsEnabled?.length ? skillsEnabled.join(', ') : 'cron (default)');
 
   const MAX_REPLIED_IDS = 500;
@@ -405,12 +404,7 @@ async function main() {
     chatHistoryByJid.set(jid, list);
   }
 
-  // Agent logic: LLM decides from skill docs; we only run what it returns (run_skill). No intent layer.
-  const allTools = runSkillTool;
-  const useSkills = Array.isArray(skillsEnabled) && skillsEnabled.length > 0 && allTools.length > 0;
-  const toolsToUse = useSkills ? allTools : [];
-  const useTools = toolsToUse.length > 0;
-
+  // Agent logic: getSkillContext() called on every run; compact list in tool; full doc injected when a skill is called.
   const WHO_AM_I_MD = 'WhoAmI.md';
   const MY_HUMAN_MD = 'MyHuman.md';
   const SOUL_MD = 'SOUL.md';
@@ -585,21 +579,20 @@ async function main() {
       groupNonOwner: !!bioOpts.groupNonOwner,
     };
     const isGroupNonOwner = !!bioOpts.groupNonOwner;
-    const { toolsForRequest, systemPromptOpts } = isGroupNonOwner
-        ? (() => {
-          const groupJid = jid;
-          const { runSkillTool: groupTools } = getSkillContext({ groupNonOwner: true, groupJid });
-          return {
-            toolsForRequest: groupTools,
-            systemPromptOpts: {
-              groupSenderName: bioOpts.groupSenderName,
-              groupJid,
-              groupMentioned: !!bioOpts.groupMentioned,
-              groupNonOwner: !!bioOpts.groupNonOwner,
-            },
-          };
-        })()
-      : { toolsForRequest: toolsToUse, systemPromptOpts: { groupSenderName: bioOpts.groupSenderName } };
+    const skillContext = isGroupNonOwner
+      ? getSkillContext({ groupNonOwner: true, groupJid: jid })
+      : getSkillContext();
+    const toolsForRequest = Array.isArray(skillContext.runSkillTool) && skillContext.runSkillTool.length > 0
+      ? skillContext.runSkillTool
+      : [];
+    const systemPromptOpts = isGroupNonOwner
+      ? {
+          groupSenderName: bioOpts.groupSenderName,
+          groupJid: jid,
+          groupMentioned: !!bioOpts.groupMentioned,
+          groupNonOwner: true,
+        }
+      : { groupSenderName: bioOpts.groupSenderName };
     const isGroupJid = isTelegramGroupJid(jid) || isWhatsAppGroupJid(jid);
     const historyMessages = isGroupJid
       ? readLastGroupExchanges(getWorkspaceDir(), jid, MAX_CHAT_HISTORY_EXCHANGES)
@@ -610,6 +603,7 @@ async function main() {
       systemPrompt: buildSystemPrompt(systemPromptOpts),
       tools: toolsForRequest,
       historyMessages,
+      getFullSkillDoc: skillContext.getFullSkillDoc,
     });
     const textForSend = isTelegramChatId(jid) ? textToSend.replace(/^\[CowCode\]\s*/i, '').trim() : textToSend;
     const isGroupNoReply = bioOpts.groupNonOwner && !bioOpts.groupMentioned &&

@@ -35,7 +35,7 @@ async function main() {
   const workspaceDir = payload.workspaceDir && String(payload.workspaceDir).trim() || getWorkspaceDir();
   const noop = () => {};
   const ctx = { storePath, jid, workspaceDir, scheduleOneShot: noop, startCron: noop };
-  const { runSkillTool } = getSkillContext();
+  const { runSkillTool, getFullSkillDoc } = getSkillContext();
   const toolsToUse = Array.isArray(runSkillTool) && runSkillTool.length > 0 ? runSkillTool : [];
   const { textToSend } = await runAgentTurn({
     userText: message,
@@ -43,6 +43,7 @@ async function main() {
     systemPrompt: buildCronSystemPrompt(),
     tools: toolsToUse,
     historyMessages: [],
+    getFullSkillDoc,
   });
   process.stdout.write(JSON.stringify({ textToSend }) + '\n');
 }

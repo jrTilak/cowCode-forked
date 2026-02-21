@@ -1,5 +1,6 @@
 ---
 id: read
+name: Read
 description: Read a file's contents and return every line. Peek without touching. Use when the user asks to read, show, or peek at a file.
 ---
 

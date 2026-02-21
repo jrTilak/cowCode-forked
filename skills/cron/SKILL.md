@@ -1,5 +1,6 @@
 ---
 id: cron
+name: Cron
 description: Manage reminders and scheduled messages. Actions: list, add, remove. See skill.md for arguments.
 ---
 

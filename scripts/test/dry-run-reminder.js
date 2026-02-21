@@ -67,7 +67,7 @@ function step1Print(userMessage) {
 
   console.log('\nFiles / sources used:');
   console.log('  - System prompt = role only (schedule + timezone). Skill docs are in the run_skill tool description, not in system.');
-  console.log('  - skills/loader.js: getSkillContext() → runSkillTool with skill docs in tool description; single tool "run_skill".');
+  console.log('  - skills/loader.js: getSkillContext() → runSkillTool with compact list (name + description) in tool description; full doc injected when a skill is called.');
   console.log('  - No memory file is injected into the prompt; memory skill is available for the LLM to call if needed.\n');
 
   console.log('System prompt (first 800 chars):');
