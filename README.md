@@ -11,39 +11,9 @@
 
 ---
 
-<table style="table-layout: fixed; width: 100%;">
-<tr>
-<th style="width: 33%; text-align: left;">Install - Mac | Linux | Windows</th>
-<th style="width: 33%; text-align: left;">Start the Bot - Mac | Linux | Windows</th>
-<th style="width: 33%; text-align: left;">Other commands - Mac | Linux | Windows</th>
-</tr>
-<tr>
-<td style="width: 33%; overflow-wrap: break-word; word-break: break-all; vertical-align: top;">
-
-<pre style="white-space: pre-wrap; word-break: break-all;"><code>curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh | bash</code></pre>
-
-<strong>Windows:</strong> Use <strong>Git Bash</strong> for all commands. Install <a href="https://gitforwindows.org/">Git Bash</a> if needed and <a href="https://nodejs.org/">Node.js</a> (in PATH).
-
-</td>
-<td style="width: 33%; vertical-align: top;">
-
-<pre><code>cowcode moo start</code></pre>
-
-You can close the terminal.<br>It keeps running.
-
-</td>
-<td style="width: 33%; vertical-align: top;">
-
-<ul>
-<li><code>cowcode update</code> - get the latest version</li>
-<li><code>cowcode uninstall</code> - remove cowCode</li>
-<li><code>cowcode logs</code> - view bot logs</li>
-<li><code>cowcode dashboard</code> - open the dashboard</li>
-</ul>
-
-</td>
-</tr>
-</table>
+| 1️⃣ Install · Mac, Linux, Windows | 2️⃣ Start the Bot · Mac, Linux, Windows | Other commands |
+|----------------------------------|----------------------------------------|----------------|
+| <code>curl -fsSL https://raw.githubusercontent.com/bishwashere/cowCode/master/install.sh &#124; bash</code><br><br>**Windows:** Use **Git Bash** and [Node.js](https://nodejs.org/). [Git Bash](https://gitforwindows.org/) if needed. | <code>cowcode moo start</code><br><br>You can close the terminal. It keeps running. | <code>cowcode update</code> - latest version<br><code>cowcode uninstall</code> - remove cowCode<br><code>cowcode logs</code> - view logs<br><code>cowcode dashboard</code> - open dashboard |
 
 ---
 
