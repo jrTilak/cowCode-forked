@@ -1,3 +1,8 @@
+---
+id: apply-patch
+description: Apply a Git-style diff hunk to a file. Feed a diff hunk (plus new line, minus remove). Use when the user wants to apply a patch or diff.
+---
+
 # Apply Patch
 
 Git-style **patch applicator**. You feed it a **diff hunk** — lines with `+` (add) or `-` (remove), optionally context lines (space-prefixed). The skill applies the hunk to the file.

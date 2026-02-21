@@ -24,7 +24,6 @@ import { getSkillContext } from '../../skills/loader.js';
 import { chatWithTools } from '../../llm.js';
 import { executeSkill } from '../../skills/executor.js';
 import { getSchedulingTimeContext } from '../../lib/timezone.js';
-import { CLARIFICATION_RULE } from '../../lib/agent.js';
 
 const DEFAULT_MSG = 'Remind me to call Bishwas tomorrow at 5.30 p.m.';
 
@@ -39,9 +38,7 @@ Use the cron tool to add, list, or remove reminders as requested.
 ${timeCtx.timeContextLine}
 Current time UTC (for "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.
 
-Important: job.message must be exactly what the user asked to receive.
-
-${CLARIFICATION_RULE} If the user says "remind me" with no when or what and you are truly stuck, ask e.g. "When should I remind you, and what message would you like?"`;
+Important: job.message must be exactly what the user asked to receive.`;
 }
 
 function section(title) {
@@ -53,7 +50,7 @@ function section(title) {
 function step1BuildPayload(userMessage) {
   const { skillDocs, runSkillTool } = getSkillContext();
   const skillDocsBlock = skillDocs
-    ? '\n\n# Available skills\n\n' + skillDocs + '\n\n# Clarification\n' + CLARIFICATION_RULE
+    ? '\n\n# Available skills\n\n' + skillDocs
     : '';
   const systemPrompt = getScheduleSystemPrompt() + skillDocsBlock;
 

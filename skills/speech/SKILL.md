@@ -1,3 +1,8 @@
+---
+id: speech
+description: Voice-to-text (Whisper) and text-to-voice (11Labs). Use when transcribing audio, converting speech to text, or generating spoken audio from text. Commands: transcribe, synthesize.
+---
+
 # Speech
 
 Voice-to-text via **Whisper** (OpenAI) and text-to-voice via **11Labs**. Use when the user wants to transcribe audio, convert speech to text, or generate spoken audio from text.

@@ -1,3 +1,8 @@
+---
+id: browse
+description: Local browser control: navigate, click, scroll, fill forms, screenshot. Uses Playwright (Chromium). See SKILL.md for arguments.
+---
+
 # Browse
 
 Control a **local headless browser** (Playwright/Chromium) on the user's machine. No cloud middleman. Use when the user wants to **go to a URL, interact with the page, or bring back proof** (e.g. open a site, click a button, fill a form, take a screenshot).

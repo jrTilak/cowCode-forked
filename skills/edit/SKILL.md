@@ -1,3 +1,8 @@
+---
+id: edit
+description: Replace exact string(s) in a file. Scans, finds matches, changes only those, saves. Fails if no match. Use when the user asks to replace, change, or fix a specific string in a file.
+---
+
 # Edit
 
 Surgical find-and-replace in a file. Scans for **exact** matches, changes only those, saves. **Fails if no match** — so you know the edit was applied.

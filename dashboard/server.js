@@ -90,19 +90,37 @@ function getAllSkillIds() {
   if (!existsSync(SKILLS_DIR)) return [];
   return readdirSync(SKILLS_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
-    .filter((d) => existsSync(join(SKILLS_DIR, d.name, 'skill.json')))
+    .filter((d) => SKILL_MD_NAMES.some((name) => existsSync(join(SKILLS_DIR, d.name, name))))
     .map((d) => d.name);
 }
 
-function getSkillDescription(skillId) {
-  const jsonPath = join(SKILLS_DIR, skillId, 'skill.json');
-  if (!existsSync(jsonPath)) return '';
-  try {
-    const data = JSON.parse(readFileSync(jsonPath, 'utf8'));
-    return data.description || '';
-  } catch {
-    return '';
+/** Parse YAML-like front matter (--- ... ---) and return { description } (and id/name if present). */
+function parseSkillFrontMatter(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return {};
+  const block = match[1];
+  const out = {};
+  for (const line of block.split(/\r?\n/)) {
+    const colon = line.indexOf(':');
+    if (colon === -1) continue;
+    const key = line.slice(0, colon).trim();
+    const value = line.slice(colon + 1).trim();
+    if (key && value) out[key] = value;
   }
+  return out;
+}
+
+function getSkillDescription(skillId) {
+  for (const name of SKILL_MD_NAMES) {
+    const mdPath = join(SKILLS_DIR, skillId, name);
+    if (!existsSync(mdPath)) continue;
+    try {
+      const content = readFileSync(mdPath, 'utf8');
+      const fm = parseSkillFrontMatter(content);
+      return fm.description || '';
+    } catch (_) {}
+  }
+  return '';
 }
 
 function getSkillMdPath(skillId) {

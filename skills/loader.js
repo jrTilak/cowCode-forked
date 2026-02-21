@@ -17,7 +17,6 @@ export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 
 /** Core commands (ls, cd, pwd, cat, less, cp, mv, rm, touch, chmod). Always loaded; no need to enable in config. */
 const CORE_SKILL_IDS = ['core'];
 
-const SKILL_JSON = 'skill.json';
 const MD_NAMES = ['skill.md', 'SKILL.md'];
 
 function getSkillMdPath(skillId) {
@@ -41,7 +40,7 @@ export function getSkillsEnabled() {
 }
 
 /**
- * Load skill folders (skill.json + skill.md) for enabled ids. Return docs string and one run_skill tool.
+ * Load skill folders (SKILL.md with optional YAML front matter: id, description) for enabled ids. Return docs string and one run_skill tool.
  * No branching: one tool, LLM fills skill + arguments from the prompts. Code stays dumb.
  * @param {{ groupNonOwner?: boolean, groupJid?: string }} [options] - When groupNonOwner true, use group config; groupJid = that group's id for per-group skills.
  * @returns {{ skillDocs: string, runSkillTool: Array }}
@@ -56,16 +55,13 @@ export function getSkillContext(options = {}) {
   const available = [];
 
   for (const id of idsToLoad) {
-    const jsonPath = join(__dirname, id, SKILL_JSON);
-    if (!existsSync(jsonPath)) continue;
+    const mdPath = getSkillMdPath(id);
+    if (!mdPath) continue;
     try {
-      JSON.parse(readFileSync(jsonPath, 'utf8'));
+      const skillMd = readFileSync(mdPath, 'utf8').trim();
+      if (!skillMd) continue;
       available.push(id);
-      const mdPath = getSkillMdPath(id);
-      if (mdPath) {
-        const skillMd = readFileSync(mdPath, 'utf8').trim();
-        parts.push(`## Skill: ${id}\n\n${skillMd}`);
-      }
+      parts.push(`## Skill: ${id}\n\n${skillMd}`);
     } catch (_) {}
   }
 

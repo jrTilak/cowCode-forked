@@ -1,6 +1,7 @@
 ---
+id: gog
 name: gog
-description: Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.
+description: Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs. Actions: run. See SKILL.md for arguments.
 homepage: https://gogcli.sh
 ---
 

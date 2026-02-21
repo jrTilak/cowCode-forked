@@ -22,7 +22,7 @@ const {
   downloadMediaMessage,
 } = Baileys;
 import { chat as llmChat, chatWithTools, loadConfig } from './llm.js';
-import { runAgentTurn, stripThinking, CLARIFICATION_RULE } from './lib/agent.js';
+import { runAgentTurn, stripThinking } from './lib/agent.js';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs';
@@ -43,6 +43,7 @@ import { appendGroupExchange, readLastGroupExchanges } from './lib/chat-log.js';
 import { handleTelegramPrivateMessage } from './lib/telegram-private-handler.js';
 import { handleTelegramGroupMessage } from './lib/telegram-group-handler.js';
 import { ensureGroupConfigFor, readGroupMd } from './lib/group-config.js';
+import { loadGroupMd, buildGroupPromptBlock } from './lib/group-prompt.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
 import { toUserMessage } from './lib/user-error.js';
 import { getSpeechConfig, transcribe, synthesizeToBuffer } from './lib/speech-client.js';
@@ -411,14 +412,15 @@ async function main() {
   const useTools = toolsToUse.length > 0;
 
   const skillDocsBlock = skillDocs
-    ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
+    ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${skillDocs}`
     : '';
 
   const WHO_AM_I_MD = 'WhoAmI.md';
   const MY_HUMAN_MD = 'MyHuman.md';
   const SOUL_MD = 'SOUL.md';
+  const GROUP_MD = 'group.md';
 
-  const WORKSPACE_DEFAULT_FILES = [WHO_AM_I_MD, MY_HUMAN_MD, SOUL_MD];
+  const WORKSPACE_DEFAULT_FILES = [WHO_AM_I_MD, MY_HUMAN_MD, SOUL_MD, GROUP_MD];
   const INSTALL_DIR = (process.env.COWCODE_INSTALL_DIR && resolve(process.env.COWCODE_INSTALL_DIR)) || __dirname;
   const DEFAULT_WORKSPACE_DIR = join(INSTALL_DIR, 'workspace-default');
 
@@ -450,13 +452,14 @@ async function main() {
     ensureWorkspaceDefaults();
   }
 
-  const DEFAULT_SOUL_CONTENT = `You are CowCode. A helpful assistant.
-Answer in the language the user asked in.
-Do not fabricate tool results or data that was not retrieved.
-You may compute and answer using available results.
-Do not use <think> or any reasoning blocks—output only the final reply.
-Do not use asterisks in replies.
-`;
+  /** Read initial soul from workspace-default/SOUL.md when workspace/group have no SOUL.md. */
+  function readDefaultSoul() {
+    const p = join(DEFAULT_WORKSPACE_DIR, SOUL_MD);
+    try {
+      if (existsSync(p)) return readFileSync(p, 'utf8').trim();
+    } catch (_) {}
+    return '';
+  }
 
   function getBioFromConfig() {
     try {
@@ -519,18 +522,19 @@ Do not use asterisks in replies.
     const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
     const workspaceDir = forGroup ? getGroupDir(groupJid) : getWorkspaceDir();
     const pathsLine = forGroup
-      ? `\n\nIn group chat you must never reveal or mention filesystem paths, install location, state directory, workspace path, or config file locations. Do not offer to read specific files (e.g. config.json) by path in your replies. If asked where something is installed or for paths, give a short generic answer (e.g. "I can't share paths here") and do not use the read skill to show config or paths in group.`
+      ? ''
       : `\n\nCowCode on this system: state dir ${getStateDir()}, workspace ${workspaceDir}. When the user asks where cowcode is installed or where config is, use the read skill with path \`~/.cowcode/config.json\` (or the state dir path above) to show config and confirm.`;
     let soulContent = forGroup
-      ? (readGroupMd(SOUL_MD, groupJid) || readWorkspaceMd(SOUL_MD) || DEFAULT_SOUL_CONTENT) + pathsLine
-      : (readWorkspaceMd(SOUL_MD) || DEFAULT_SOUL_CONTENT) + pathsLine;
+      ? (readGroupMd(SOUL_MD, groupJid) || readWorkspaceMd(SOUL_MD) || readDefaultSoul())
+      : (readWorkspaceMd(SOUL_MD) || readDefaultSoul()) + pathsLine;
     if (forGroup) {
-      soulContent += `\n\nYou are in a group chat. The current message was sent by ${opts.groupSenderName}. Messages may be prefixed with "Message from [name] in the group" — that [name] is the sender. When greeting, use that exact name (e.g. "Hey ${opts.groupSenderName}" or "Hi ${opts.groupSenderName}"). Never attribute a request to the bot owner unless the prefix says the bot owner's name. When asked who asked something, name the person from the "Message from [name]" prefix. In group chat, do not proactively list directories, scan multiple files, or enumerate skills; only do the specific action the user asked for (e.g. read only the file they named). Never mention or expose filesystem paths, host paths, or install locations in your replies.`;
-      if (opts.groupMentioned) {
-        soulContent += `\n\nYou were @mentioned in this message — please reply.`;
-      } else {
-        soulContent += `\n\nYou were NOT @mentioned. Reply only when: (1) you notice important information is missing or incorrect and you can add value, or (2) there has been a long gap since your last message and it's natural to chime in. If you have nothing important to add, output exactly: [NO_REPLY] and nothing else.`;
-      }
+      const loaded = loadGroupMd(getWorkspaceDir(), DEFAULT_WORKSPACE_DIR);
+      const groupBlock = buildGroupPromptBlock(loaded, {
+        groupSenderName: opts.groupSenderName,
+        groupMentioned: !!opts.groupMentioned,
+        groupNonOwner: !!opts.groupNonOwner,
+      });
+      if (groupBlock) soulContent += '\n\n' + groupBlock;
     }
     const effectiveSkillDocsBlock = opts.skillDocsBlock != null ? opts.skillDocsBlock : skillDocsBlock;
     const effectiveUseTools = opts.useTools != null ? opts.useTools : useTools;
@@ -594,7 +598,7 @@ Do not use asterisks in replies.
           const groupJid = jid;
           const { skillDocs: groupSkillDocs, runSkillTool: groupTools } = getSkillContext({ groupNonOwner: true, groupJid });
           const groupSkillDocsBlock = groupSkillDocs
-            ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${groupSkillDocs}\n\n# Clarification\n${CLARIFICATION_RULE}`
+            ? `\n\n# Available skills (read these to decide when to use run_skill and which arguments to pass)\n\n${groupSkillDocs}`
             : '';
           return {
             toolsForRequest: groupTools,
@@ -602,6 +606,7 @@ Do not use asterisks in replies.
               groupSenderName: bioOpts.groupSenderName,
               groupJid,
               groupMentioned: !!bioOpts.groupMentioned,
+              groupNonOwner: !!bioOpts.groupNonOwner,
               skillDocsBlock: groupSkillDocsBlock,
               useTools: groupTools.length > 0,
             },
@@ -769,6 +774,7 @@ Do not use asterisks in replies.
         getWorkspaceDir,
         toUserMessage,
         getBotUsername: createGetBotUsername(optsTelegramBot),
+        getGroupPromptMessages: () => loadGroupMd(getWorkspaceDir(), DEFAULT_WORKSPACE_DIR).messages,
       };
       optsTelegramBot.on('message', async (msg) => {
         if (isTelegramGroup(msg.chat)) {
@@ -1076,6 +1082,7 @@ Do not use asterisks in replies.
       toUserMessage,
       getBotUsername: createGetBotUsername(telegramBot),
       getGroupAddedBy,
+      getGroupPromptMessages: () => loadGroupMd(getWorkspaceDir(), DEFAULT_WORKSPACE_DIR).messages,
     };
     let cachedTelegramBotUserId = null;
     async function getTelegramBotUserId() {

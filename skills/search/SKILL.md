@@ -1,3 +1,8 @@
+---
+id: search
+description: Search the web or fetch a URL. Actions: search (query), navigate (url). See skill.md for arguments.
+---
+
 # Search
 
 Search the web or fetch a page. Call **run_skill** with **skill: "search"**. The **command name** is the operation: use **command** or **arguments.action** set to exactly one of: **search**, **navigate**.

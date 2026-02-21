@@ -1,3 +1,8 @@
+---
+id: core
+description: Core shell commands (always available): ls, cd, pwd, cat, less, cp, mv, rm, touch, chmod. Use for listing dirs, reading files, copying, moving, deleting, and permissions. No need to enable—always installed.
+---
+
 # Core commands
 
 Built-in shell commands. **Always available** — no need to enable in config.

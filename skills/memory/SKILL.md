@@ -1,3 +1,8 @@
+---
+id: memory
+description: Semantic search and save over notes (MEMORY.md, memory/*.md) and chat history. Chat is baked in—every message auto-indexed; 'Remember what we said yesterday?' pulls from logs. No manual moo index. Tools: memory_search, memory_get, memory_save. See SKILL.md.
+---
+
 # Memory
 
 Semantic search over your **notes** (`MEMORY.md`, `memory/*.md`) and **chat history** (every conversation is automatically indexed). "Remember what we said yesterday?" pulls from logs—no manual step.

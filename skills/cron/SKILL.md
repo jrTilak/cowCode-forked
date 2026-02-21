@@ -1,3 +1,8 @@
+---
+id: cron
+description: Manage reminders and scheduled messages. Actions: list, add, remove. See skill.md for arguments.
+---
+
 # Cron
 
 Manage reminders and scheduled messages: **one-shot** (at a specific time) or **recurring** (every morning, every 5 minutes, etc.). Call **run_skill** with **skill: "cron"**. The **command name** is the operation: use **command** or **arguments.action** set to exactly one of: **list**, **add**, **remove**.

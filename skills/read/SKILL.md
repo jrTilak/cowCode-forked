@@ -1,3 +1,8 @@
+---
+id: read
+description: Read a file's contents and return every line. Peek without touching. Use when the user asks to read, show, or peek at a file.
+---
+
 # Read
 
 Grabs a file's contents and returns every line. Like **peeking without touching** — no edits, no side effects.
