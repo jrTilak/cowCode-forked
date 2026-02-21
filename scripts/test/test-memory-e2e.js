@@ -1,9 +1,8 @@
 /**
- * E2E tests for memory: chat log is written, and (when embedding is available) memory recall works.
- * Uses temp state dir; ensures memory is enabled in config. Two tests:
+ * E2E tests for memory: chat log is written, and memory recall works.
  * 1. Chat log written — one message → assert workspace/chat-log/YYYY-MM-DD.jsonl contains the exchange.
- * 2. Memory recall — store a distinct phrase, then ask "what was the phrase?" and assert reply contains it.
- *    Requires embedding API; if embedding fails, the recall test may fail (index not updated).
+ * 2. Memory recall — store a phrase, ask "what did we talk about yesterday?", then use an LLM judge to decide
+ *    whether the bot answered the user's question (no regex or pattern matching).
  */
 
 import { spawn } from 'child_process';
@@ -11,7 +10,9 @@ import { readFileSync, mkdirSync, writeFileSync, existsSync, copyFileSync, readd
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, tmpdir } from 'os';
+import dotenv from 'dotenv';
 import { runSkillTests } from './skill-test-runner.js';
+import { getEnvPath } from '../../lib/paths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -22,11 +23,50 @@ const E2E_REPLY_MARKER_START = 'E2E_REPLY_START';
 const E2E_REPLY_MARKER_END = 'E2E_REPLY_END';
 const PER_TEST_TIMEOUT_MS = 120_000;
 
-/** Unique phrase we store then ask for; must be unlikely to appear by chance. */
-const MEMORY_RECALL_PHRASE = 'COWCODE_E2E_MAGIC_42';
+/** Phrase we store in the first message so the judge can verify the bot recalled it. */
+const STORED_PHRASE = 'COWCODE_E2E_MAGIC_42';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+/**
+ * Use LLM to judge whether the bot's reply answered the user's question.
+ * @param {string} firstUserMessage - What the user said in the previous turn (what should be recalled).
+ * @param {string} userQuestion - The question the user asked (e.g. "What did we talk about yesterday?").
+ * @param {string} botReply - The bot's reply.
+ * @param {string} stateDir - State dir (for config/env when calling LLM).
+ * @returns {Promise<{ pass: boolean, reason?: string }>}
+ */
+async function judgeRecall(firstUserMessage, userQuestion, botReply, stateDir) {
+  const prevStateDir = process.env.COWCODE_STATE_DIR;
+  process.env.COWCODE_STATE_DIR = stateDir;
+  try {
+    dotenv.config({ path: getEnvPath() });
+    const { chat } = await import('../../llm.js');
+    const judgePrompt = `You are a test judge. In a chat, the user first said:
+---
+${firstUserMessage}
+---
+Then in a later message (in a separate turn) the user asked:
+---
+${userQuestion}
+---
+The bot replied:
+---
+${botReply}
+---
+Did the bot answer the user's question? The bot has access to memory search over past messages. If the bot recalled or referenced what was discussed (the phrase or topic from the first message), or stated the phrase/topic in any form, answer YES. If the bot said it doesn't know, doesn't have that information, or the user didn't ask to remember anything, answer NO. Reply with exactly one line: YES or NO. Then add one short sentence explaining why.`;
+    const response = await chat([
+      { role: 'user', content: judgePrompt },
+    ]);
+    const trimmed = (response || '').trim().toUpperCase();
+    const pass = trimmed.startsWith('YES');
+    return { pass, reason: (response || '').trim().slice(0, 500) };
+  } finally {
+    if (prevStateDir !== undefined) process.env.COWCODE_STATE_DIR = prevStateDir;
+    else delete process.env.COWCODE_STATE_DIR;
+  }
 }
 
 /**
@@ -75,10 +115,10 @@ function createTempStateDir() {
 }
 
 /**
- * Run the main app in --test mode with one message; return the reply text.
+ * Run the main app in --test mode with one message; return the reply text and stderr.
  * @param {string} userMessage
  * @param {{ stateDir?: string }} [opts]
- * @returns {Promise<string>}
+ * @returns {Promise<{ reply: string, stderr: string }>}
  */
 function runE2E(userMessage, opts = {}) {
   const env = { ...process.env };
@@ -119,7 +159,7 @@ function runE2E(userMessage, opts = {}) {
         reject(new Error(`Process exited ${code}. Reply: ${reply.slice(0, 200)}`));
         return;
       }
-      resolve(reply);
+      resolve({ reply, stderr });
     });
   });
 }
@@ -157,15 +197,15 @@ async function main() {
   console.log('');
 
   const storeMessage = `Memory e2e test message at ${Date.now()}.`;
-  const storePhraseMessage = `Remember this exact phrase for the next message: ${MEMORY_RECALL_PHRASE}.`;
-  const recallQuery = `What was the exact phrase I asked you to remember in the previous message? Reply with only that phrase.`;
+  const storePhraseMessage = `Remember this exact phrase for the next message: ${STORED_PHRASE}.`;
+  const recallQuery = 'Use your memory skill to search for what I asked you to remember in the previous message, then tell me that phrase.';
 
   const tests = [
     {
       name: 'memory: chat log written',
       run: async () => {
         const { stateDir, workspaceDir } = createTempStateDir();
-        const reply = await runE2E(storeMessage, { stateDir });
+        const { reply } = await runE2E(storeMessage, { stateDir });
         assert(reply && reply.length > 0, 'Expected non-empty reply');
         const log = getLatestChatLog(workspaceDir);
         assert(log && log.lines.length >= 1, 'Expected at least one line in chat-log');
@@ -181,23 +221,41 @@ async function main() {
       },
     },
     {
-      name: 'memory: recall (store phrase → ask for it)',
+      name: 'memory: recall (store phrase → ask what I asked you to remember)',
       run: async () => {
-        const { stateDir } = createTempStateDir();
-        const reply1 = await runE2E(storePhraseMessage, { stateDir });
+        const { stateDir, workspaceDir } = createTempStateDir();
+        const run1 = await runE2E(storePhraseMessage, { stateDir });
+        const reply1 = run1.reply;
         assert(reply1 && reply1.length > 0, 'Expected non-empty first reply');
-        const reply2 = await runE2E(recallQuery, { stateDir });
+        const logAfterFirst = getLatestChatLog(workspaceDir);
+        assert(logAfterFirst && logAfterFirst.lines.length >= 1, 'First run must write chat log before second run');
+        const prevState = process.env.COWCODE_STATE_DIR;
+        process.env.COWCODE_STATE_DIR = stateDir;
         try {
-          assert(
-            reply2 && reply2.includes(MEMORY_RECALL_PHRASE),
-            `Expected reply to contain "${MEMORY_RECALL_PHRASE}". Got (first 300 chars): ${(reply2 || '').slice(0, 300)}. If embedding is not configured, set memory.embedding or use an LLM provider with embeddings.`
-          );
-        } catch (e) {
-          const msg = (e && e.message) || '';
-          if (msg.includes('Expected reply to contain') && /can't (?:see|access)|don't have|not in memory|don't recall|couldn't find|no.*memory|embedding not configured|memory\/history/i.test(msg)) {
-            return; // skip: embedding not available, treat as pass so test:all stays green
+          dotenv.config({ path: getEnvPath() });
+          const { getMemoryConfig } = await import('../../lib/memory-config.js');
+          const { getMemoryIndex } = await import('../../lib/memory-index.js');
+          const memConfig = getMemoryConfig();
+          if (memConfig) {
+            const index = getMemoryIndex(memConfig);
+            const results = await index.search(storePhraseMessage.slice(0, 80));
+            if (!results || results.length === 0) {
+              throw new Error('Memory index empty after first run. First run stderr (last 400): ' + (run1.stderr || '').slice(-400));
+            }
           }
-          throw e;
+        } finally {
+          if (prevState !== undefined) process.env.COWCODE_STATE_DIR = prevState;
+          else delete process.env.COWCODE_STATE_DIR;
+        }
+        await new Promise((r) => setTimeout(r, 500));
+        const run2 = await runE2E(recallQuery, { stateDir });
+        const reply2 = run2.reply;
+        assert(reply2 && reply2.length > 0, 'Expected non-empty second reply');
+        const { pass, reason } = await judgeRecall(storePhraseMessage, recallQuery, reply2, stateDir);
+        const replyContainsPhrase = reply2 && reply2.includes(STORED_PHRASE);
+        if (!pass && !replyContainsPhrase) {
+          const stderrHint = run2.stderr ? ` Second run stderr (last 300): ${run2.stderr.slice(-300)}` : '';
+          throw new Error(`Memory recall failed: LLM judge said the bot did not answer the user's question. Judge: ${reason || 'NO'}. Bot reply (first 400 chars): ${(reply2 || '').slice(0, 400)}.${stderrHint}`);
         }
       },
     },

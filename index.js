@@ -26,6 +26,7 @@ import { runAgentTurn, stripThinking } from './lib/agent.js';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs';
+import { spawn } from 'child_process';
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot, runPastDueOneShots } from './cron/runner.js';
 import { getSkillsEnabled, getSkillContext, DEFAULT_ENABLED } from './skills/loader.js';
@@ -406,9 +407,8 @@ async function main() {
 
   // Agent logic: getSkillContext() called on every run; compact list in tool; full doc injected when a skill is called.
 
-  /** Tide: periodic check for tasks. Config: tide.enabled, tide.intervalMinutes, tide.jid (where to send reply). */
+  /** Tide: periodic check in its own process (does not block chat). Reply sent to tide.jid like cron. */
   let tideIntervalId = null;
-  let tideSelfJid = null;
   async function runTide() {
     let config = {};
     try {
@@ -418,34 +418,51 @@ async function main() {
     const tide = config.tide || {};
     if (!tide.enabled) return;
     const tideJid = tide.jid && String(tide.jid).trim() ? String(tide.jid).trim() : null;
-    const timeCtx = getSchedulingTimeContext();
-    const userText =
-      '[Tide] Periodic check. Current time: ' +
-      timeCtx.nowIso +
-      '. Do you have any pending tasks, follow-ups, or things to do for the user? If yes, reply with what to do or say (your reply will be sent to the user). If no, reply with nothing or a single line saying nothing to do.';
-    const ctx = {
+    if (!tideJid || !sock?.sendMessage) return;
+    const payload = JSON.stringify({
+      jid: tideJid,
       storePath: getCronStorePath(),
-      jid: tideJid || 'tide',
       workspaceDir: getWorkspaceDir(),
-      scheduleOneShot,
-      startCron: () => startCron({ sock, selfJid: tideSelfJid, storePath: getCronStorePath(), telegramBot: telegramBot || undefined }),
-      groupNonOwner: false,
-    };
-    const skillContext = getSkillContext();
-    const toolsForRequest = Array.isArray(skillContext.runSkillTool) && skillContext.runSkillTool.length > 0 ? skillContext.runSkillTool : [];
-    const historyMessages = tideJid ? getLast5Exchanges(tideJid) : [];
-    const { textToSend } = await runAgentTurn({
-      userText,
-      ctx,
-      systemPrompt: buildSystemPrompt({}),
-      tools: toolsForRequest,
-      historyMessages,
-      getFullSkillDoc: skillContext.getFullSkillDoc,
     });
+    let textToSend = '';
+    try {
+      textToSend = await new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ['cron/run-tide.js'], {
+          cwd: __dirname,
+          stdio: ['pipe', 'pipe', 'inherit'],
+          env: { ...process.env, COWCODE_STATE_DIR: process.env.COWCODE_STATE_DIR },
+        });
+        let out = '';
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => { out += chunk; });
+        child.on('exit', (code, signal) => {
+          if (code !== 0 && code != null) {
+            reject(new Error(`run-tide exited with code ${code}`));
+            return;
+          }
+          if (signal) {
+            reject(new Error(`run-tide killed: ${signal}`));
+            return;
+          }
+          const lastLine = out.trim().split('\n').filter(Boolean).pop() || '';
+          try {
+            const parsed = JSON.parse(lastLine);
+            if (parsed.error) reject(new Error(parsed.error));
+            else resolve(parsed.textToSend || '');
+          } catch (e) {
+            reject(new Error(lastLine.slice(0, 100) || e.message || 'run-tide invalid output'));
+          }
+        });
+        child.on('error', reject);
+        child.stdin.end(payload, 'utf8');
+      });
+    } catch (e) {
+      console.error('[tide]', e.message);
+      return;
+    }
     const text = (textToSend || '').trim();
     const nothingPhrases = /^(nothing|n\/?a|no(ne)?\s*to\s*do|all\s*good|nothing\s*to\s*report\.?)\s*\.?$/i;
     if (!text || (text.length < 50 && nothingPhrases.test(text))) return;
-    if (!tideJid || !sock?.sendMessage) return;
     try {
       await sock.sendMessage(tideJid, { text });
       console.log('[tide] Sent to', tideJid.slice(0, 20) + (tideJid.length > 20 ? '…' : ''));
@@ -454,7 +471,6 @@ async function main() {
     }
   }
   function startTide(sockRef, selfJidRef) {
-    tideSelfJid = selfJidRef ?? null;
     let config = {};
     try {
       const raw = readFileSync(getConfigPath(), 'utf8');
@@ -723,9 +739,10 @@ async function main() {
           } else {
             const memoryConfig = getMemoryConfig();
             if (memoryConfig) {
-              indexChatExchange(memoryConfig, exchange).catch((err) =>
+              const indexPromise = indexChatExchange(memoryConfig, exchange).catch((err) =>
                 console.error('[memory] auto-index failed:', err.message)
               );
+              if (process.argv.includes('--test')) await indexPromise;
             }
           }
         }
@@ -769,7 +786,7 @@ async function main() {
     const reply = lastSent.get('test@s.whatsapp.net');
     if (reply != null) {
       console.log('E2E_REPLY_START');
-      console.log(reply);
+      process.stdout.write(reply + '\n'); // full reply for E2E (no log redaction)
       console.log('E2E_REPLY_END');
     }
     console.log('[test] Done. Check cron/jobs.json.');
