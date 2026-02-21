@@ -74,7 +74,7 @@ export function getSkillContext(options = {}) {
             type: 'function',
             function: {
               name: 'run_skill',
-              description: 'Run one of the available skills. The command name is the operation: set "command" to the operation name (e.g. search, navigate, list, add, remove) or set "arguments.action" to the same. Set "skill" and "arguments" as described in each skill.',
+              description: 'Run skills that are needed and available. The command name is the operation: set "command" to the operation name (e.g. search, navigate, list, add, remove) or set "arguments.action" to the same. Set "skill" and "arguments" as described in each skill.',
               parameters: {
                 type: 'object',
                 properties: {

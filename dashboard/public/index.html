@@ -179,15 +179,23 @@
     .history-log-files th, .history-log-files td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
     .history-log-files th { color: var(--muted); font-weight: 500; }
     .soul-tile-card { margin-top: 0.5rem; }
+    .soul-tiles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+      gap: 0.75rem;
+    }
     .soul-tile-link {
       display: flex;
       flex-direction: column;
       gap: 0.25rem;
       color: var(--text);
       text-decoration: none;
-      padding: 0.25rem 0;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
     }
-    .soul-tile-link:hover { color: var(--accent); }
+    .soul-tile-link:hover { color: var(--accent); border-color: var(--accent); }
     .soul-tile-icon { font-size: 1.1rem; color: var(--accent); }
     .soul-tile-title { font-weight: 600; font-size: 1rem; }
     .soul-tile-desc { font-size: 0.8rem; color: var(--muted); }
@@ -198,6 +206,7 @@
   <h1>cowCode Dashboard</h1>
   <nav>
     <a href="#status" data-page="status" class="active">Status</a>
+    <a href="#soul" data-page="soul">Soul</a>
     <a href="#crons" data-page="crons">Crons</a>
     <a href="#skills" data-page="skills">Skills</a>
     <a href="#groups" data-page="groups">Groups</a>
@@ -225,11 +234,29 @@
       </div>
     </div>
     <div class="card soul-tile-card">
-      <a href="#soul" data-page="soul" class="soul-tile-link">
-        <span class="soul-tile-icon">◇</span>
-        <span class="soul-tile-title">Soul & identity</span>
-        <span class="soul-tile-desc">Edit SOUL, Who am I, My human, Memory</span>
-      </a>
+      <p class="overview-label" style="margin:0 0 0.5rem 0;">Soul & identity (one-on-one)</p>
+      <div class="soul-tiles-grid">
+        <a href="#soul/SOUL.md" class="soul-tile-link">
+          <span class="soul-tile-icon">◇</span>
+          <span class="soul-tile-title">Soul</span>
+          <span class="soul-tile-desc">Edit SOUL.md</span>
+        </a>
+        <a href="#soul/WhoAmI.md" class="soul-tile-link">
+          <span class="soul-tile-icon">◇</span>
+          <span class="soul-tile-title">Who am I</span>
+          <span class="soul-tile-desc">Edit WhoAmI.md</span>
+        </a>
+        <a href="#soul/MyHuman.md" class="soul-tile-link">
+          <span class="soul-tile-icon">◇</span>
+          <span class="soul-tile-title">My human</span>
+          <span class="soul-tile-desc">Edit MyHuman.md</span>
+        </a>
+        <a href="#soul/MEMORY.md" class="soul-tile-link">
+          <span class="soul-tile-icon">◇</span>
+          <span class="soul-tile-title">Memory</span>
+          <span class="soul-tile-desc">Edit MEMORY.md</span>
+        </a>
+      </div>
     </div>
   </div>
 
@@ -346,8 +373,8 @@
 
   <script>
     const API = '';
-    var validPages = ['status', 'crons', 'skills', 'groups', 'llm', 'config'];
-    function setPage(name) {
+    var validPages = ['status', 'crons', 'skills', 'groups', 'llm', 'config', 'soul'];
+    function setPage(name, soulFileId) {
       if (!name || !validPages.includes(name)) name = 'status';
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
@@ -360,16 +387,28 @@
       if (name === 'groups') fetchGroups();
       if (name === 'llm') renderLlmForm();
       if (name === 'config') fetchConfig();
+      if (name === 'soul') {
+        fetchSoulFiles().then(function () {
+          if (soulFileId) selectSoulFile(soulFileId);
+        });
+      }
+    }
+    function parseHash() {
+      var raw = (location.hash || '#status').slice(1) || 'status';
+      var slash = raw.indexOf('/');
+      var name = slash >= 0 ? raw.slice(0, slash) : raw;
+      var soulFile = slash >= 0 ? raw.slice(slash + 1) : null;
+      return { name: name, soulFile: soulFile };
     }
     document.querySelectorAll('nav a[data-page]').forEach(function (a) {
       a.addEventListener('click', function (e) {
         e.preventDefault();
-        setPage(a.dataset.page);
+        location.hash = a.dataset.page === 'soul' ? '#soul' : '#' + a.dataset.page;
       });
     });
-    window.addEventListener('hashchange', () => {
-      const name = (location.hash || '#status').slice(1) || 'status';
-      setPage(name);
+    window.addEventListener('hashchange', function () {
+      var p = parseHash();
+      setPage(p.name, p.soulFile);
     });
 
     async function fetchStatus() {
@@ -853,6 +892,7 @@
 
     async function selectSoulFile(id) {
       selectedSoulFileId = id;
+      if (id && location.hash !== '#soul/' + id) location.hash = '#soul/' + id;
       document.querySelectorAll('#soul-files-list li').forEach(function (li) {
         var btn = li.querySelector('.soul-file-btn');
         li.classList.toggle('selected', btn && btn.getAttribute('data-id') === id);
@@ -937,7 +977,10 @@
 
     fetchStatus();
     setInterval(fetchStatus, 8000);
-    setPage((location.hash || '#status').slice(1) || 'status');
+    (function () {
+      var p = parseHash();
+      setPage(p.name, p.soulFile);
+    })();
   </script>
 </body>
 </html>
