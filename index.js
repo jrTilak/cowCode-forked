@@ -405,6 +405,79 @@ async function main() {
   }
 
   // Agent logic: getSkillContext() called on every run; compact list in tool; full doc injected when a skill is called.
+
+  /** Tide: periodic check for tasks. Config: tide.enabled, tide.intervalMinutes, tide.jid (where to send reply). */
+  let tideIntervalId = null;
+  let tideSelfJid = null;
+  async function runTide() {
+    let config = {};
+    try {
+      const raw = readFileSync(getConfigPath(), 'utf8');
+      if (raw?.trim()) config = JSON.parse(raw);
+    } catch (_) {}
+    const tide = config.tide || {};
+    if (!tide.enabled) return;
+    const tideJid = tide.jid && String(tide.jid).trim() ? String(tide.jid).trim() : null;
+    const timeCtx = getSchedulingTimeContext();
+    const userText =
+      '[Tide] Periodic check. Current time: ' +
+      timeCtx.nowIso +
+      '. Do you have any pending tasks, follow-ups, or things to do for the user? If yes, reply with what to do or say (your reply will be sent to the user). If no, reply with nothing or a single line saying nothing to do.';
+    const ctx = {
+      storePath: getCronStorePath(),
+      jid: tideJid || 'tide',
+      workspaceDir: getWorkspaceDir(),
+      scheduleOneShot,
+      startCron: () => startCron({ sock, selfJid: tideSelfJid, storePath: getCronStorePath(), telegramBot: telegramBot || undefined }),
+      groupNonOwner: false,
+    };
+    const skillContext = getSkillContext();
+    const toolsForRequest = Array.isArray(skillContext.runSkillTool) && skillContext.runSkillTool.length > 0 ? skillContext.runSkillTool : [];
+    const historyMessages = tideJid ? getLast5Exchanges(tideJid) : [];
+    const { textToSend } = await runAgentTurn({
+      userText,
+      ctx,
+      systemPrompt: buildSystemPrompt({}),
+      tools: toolsForRequest,
+      historyMessages,
+      getFullSkillDoc: skillContext.getFullSkillDoc,
+    });
+    const text = (textToSend || '').trim();
+    const nothingPhrases = /^(nothing|n\/?a|no(ne)?\s*to\s*do|all\s*good|nothing\s*to\s*report\.?)\s*\.?$/i;
+    if (!text || (text.length < 50 && nothingPhrases.test(text))) return;
+    if (!tideJid || !sock?.sendMessage) return;
+    try {
+      await sock.sendMessage(tideJid, { text });
+      console.log('[tide] Sent to', tideJid.slice(0, 20) + (tideJid.length > 20 ? '…' : ''));
+    } catch (e) {
+      console.error('[tide] Send failed:', e.message);
+    }
+  }
+  function startTide(sockRef, selfJidRef) {
+    tideSelfJid = selfJidRef ?? null;
+    let config = {};
+    try {
+      const raw = readFileSync(getConfigPath(), 'utf8');
+      if (raw?.trim()) config = JSON.parse(raw);
+    } catch (_) {}
+    const tide = config.tide || {};
+    if (!tide.enabled) return;
+    if (tideIntervalId) clearInterval(tideIntervalId);
+    const intervalMinutes = Math.max(1, Number(tide.intervalMinutes) || 30);
+    const intervalMs = intervalMinutes * 60 * 1000;
+    tideIntervalId = setInterval(() => {
+      runTide().catch((e) => console.error('[tide]', e.message));
+    }, intervalMs);
+    console.log('[tide] Started: every', intervalMinutes, 'minutes' + (tide.jid ? ' → ' + String(tide.jid).slice(0, 25) + '…' : ' (no jid; run only)'));
+  }
+  function stopTide() {
+    if (tideIntervalId) {
+      clearInterval(tideIntervalId);
+      tideIntervalId = null;
+      console.log('[tide] Stopped.');
+    }
+  }
+
   const WHO_AM_I_MD = 'WhoAmI.md';
   const MY_HUMAN_MD = 'MyHuman.md';
   const SOUL_MD = 'SOUL.md';
@@ -723,6 +796,7 @@ async function main() {
       telegramBot = optsTelegramBot;
       writeDaemonStarted();
       startCron({ storePath: getCronStorePath(), telegramBot: optsTelegramBot });
+      startTide(sock, null);
       const lastSentByJid = new Map();
       const ourSentMessageIds = new Set();
       const telegramRepliedIds = new Set();
@@ -793,6 +867,7 @@ async function main() {
       console.log('');
       if (sid) {
         startCron({ sock, selfJid: sid, storePath: getCronStorePath(), telegramBot: telegramBot || undefined });
+        startTide(sock, sid);
       }
       // Flush replies that failed to send while disconnected
       while (pendingReplies.length > 0) {
@@ -802,6 +877,7 @@ async function main() {
     }
     if (u.connection === 'close') {
       stopCron();
+      stopTide();
       const reason = u.lastDisconnect?.error;
       const code = reason?.output?.statusCode ?? reason?.statusCode;
       const msg = reason?.message || reason?.output?.payload?.message;

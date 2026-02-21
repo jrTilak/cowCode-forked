@@ -81,6 +81,24 @@ Everything stays on your computer.
 
 ---
 
+# 🌊 Tide (periodic check)
+
+Tide runs the agent on a schedule to check for pending tasks or follow-ups (no user message needed). Enable and set the interval in `~/.cowcode/config.json`:
+
+```json
+"tide": {
+  "enabled": true,
+  "intervalMinutes": 30,
+  "jid": "YOUR_WHATSAPP_JID_OR_TELEGRAM_CHAT_ID"
+}
+```
+
+* **enabled** — `true` to run tide; `false` or omit to disable.
+* **intervalMinutes** — How often to run (default 30). Minimum 1.
+* **jid** — Where to send the agent’s reply (your WhatsApp JID or Telegram chat id). If omitted, the agent still runs but no message is sent.
+
+---
+
 # 📌 That's It
 
 Private.
