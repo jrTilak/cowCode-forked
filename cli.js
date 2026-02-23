@@ -6,7 +6,7 @@
 
 import { spawn, spawnSync, execSync } from 'child_process';
 import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { existsSync, writeFileSync, unlinkSync } from 'fs';
 import { tmpdir, homedir } from 'os';
 
@@ -159,11 +159,37 @@ if (sub === 'moo') {
     const child = spawn('tail', ['-f', logPath], { stdio: 'inherit' });
     child.on('close', (code) => process.exit(code ?? 0));
   }
+} else if (sub === 'skills') {
+  const skillSub = args[1];
+  const skillArg = args[2];
+  if (skillSub === 'install' && skillArg) {
+    (async () => {
+      try {
+        const skillInstallPath = join(INSTALL_DIR, 'lib', 'skill-install.js');
+        const mod = await import(pathToFileURL(skillInstallPath).href);
+        const skillId = mod.normalizeSkillId(skillArg);
+        const result = await mod.runSkillInstall(skillId, INSTALL_DIR);
+        if (!result.ok) {
+          console.error('cowCode:', result.message);
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error('cowCode: skills install failed.', err?.message || err);
+        process.exit(1);
+      }
+    })();
+  } else {
+    console.log('Usage: cowcode skills install <skill-id>');
+    console.log('  Example: cowcode skills install home-assistant');
+    console.log('  Installs a skill (adds to config) and prompts only for that skill\'s required env vars.');
+    process.exit(skillSub === 'install' ? 1 : 0);
+  }
 } else {
   console.log('Usage: cowcode moo start | stop | status | restart');
   console.log('       cowcode logs');
   console.log('       cowcode dashboard');
   console.log('       cowcode auth [options]');
+  console.log('       cowcode skills install <skill-id>');
   console.log('       cowcode update [--force]');
   console.log('       cowcode uninstall');
   process.exit(sub ? 1 : 0);
