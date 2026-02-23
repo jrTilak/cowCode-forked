@@ -84,7 +84,7 @@ function loadConfig() {
     }
   }
   const llm = config.llm || {};
-  const defaultMaxTokens = Number(fromEnv(llm.maxTokens)) || 500;
+  const defaultMaxTokens = Number(fromEnv(llm.maxTokens)) || 100;
 
   if (Array.isArray(llm.models) && llm.models.length > 0) {
     let models = llm.models.map((entry, i) => {
