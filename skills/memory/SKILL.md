@@ -6,7 +6,7 @@ description: Semantic search and save over notes (MEMORY.md, memory/*.md). Searc
 
 # Memory
 
-Semantic search over your **notes** (`MEMORY.md`, `memory/*.md`) and optional **search log** (chat history). Use memory_search for notes whenever relevant.
+Semantic search over your **notes** (`MEMORY.md`, `memory/*.md`) and optional **search log** (chat history). Use memory_search for notes whenever relevant. You can narrow by **date range** (e.g. "What did I note last week?") so results are filtered by when the note was written, not only by semantic match.
 
 **Search log (built-in)** — Chat is stored in `workspace/chat-log/YYYY-MM-DD.jsonl` and can be searched. **Only use memory_search to search chat history when the user explicitly asks**, e.g. "what did we talk about yesterday?", "search my logs", "last time we chatted", "what did I ask you before?", "our previous conversation". Do not search logs for general queries; only when the user clearly mentions past conversations, yesterday, or logs.
 
@@ -14,7 +14,7 @@ Semantic search over your **notes** (`MEMORY.md`, `memory/*.md`) and optional **
 
 ## Tools (pass `tool` in arguments: "memory_search", "memory_get", or "memory_save")
 
-- **memory_search** — Set `tool: "memory_search"`, `query` (required). Optional: `maxResults`, `minScore`, `date`. Searches notes; if the user explicitly asked about past chats/yesterday/logs, the same search also includes chat history (`chat-log/YYYY-MM-DD.jsonl`). When the user asks about "yesterday", the search automatically includes that day's chat-log even if the word does not appear in the conversation. Optional `date: "yesterday"` can be set when the user asks about yesterday. Returns snippets with path and line range (paths may be `MEMORY.md`, `memory/2025-02-15.md`, or `chat-log/2025-02-16.jsonl`). Only search chat when the user explicitly mentions it.
+- **memory_search** — Set `tool: "memory_search"`, `query` (required). Optional: `maxResults`, `minScore`, `date`, **`dateFrom`**, **`dateTo`**, **`dateRange`**. Searches notes (and chat when the user asks about past conversations). **Date range** — When the user asks for notes or activity in a time window (e.g. "What did I note last week?", "notes from February", "yesterday's notes"), set **`dateFrom`** and **`dateTo`** as `YYYY-MM-DD`, or use **`dateRange`**: `"yesterday"`, `"last_week"` / `"last_7_days"`, or `"last_month"`. Results are restricted to chunks whose date falls in that range (not only semantic match). For "yesterday" chat, `date: "yesterday"` still includes that day's chat-log; combining with `dateRange: "yesterday"` narrows both notes and chat to that day. Returns snippets with path and line range (paths may be `MEMORY.md`, `memory/2025-02-15.md`, or `chat-log/2025-02-16.jsonl`). Only search chat when the user explicitly mentions it.
 - **memory_get** — Set `tool: "memory_get"`, `path` (required, from memory_search). Optional: `from`, `lines`. Read a snippet by path (including chat-log/*.jsonl when the user explicitly asked about past conversations).
 - **memory_save** — Set `tool: "memory_save"`, `text` (required): the note to save. Optional: `file` (default: `MEMORY.md`; use `memory/notes.md` or any `.md` path inside the workspace). Appends the note with today's date prefix and immediately re-indexes so it is searchable at once. Use when the user says "remember that…", "note this down", "save this for later", "add to my notes", etc.
 
