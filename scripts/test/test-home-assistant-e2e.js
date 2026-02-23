@@ -116,8 +116,9 @@ ${botReply}
 ---
 Did the user GET WHAT THEY WANTED? Requirements:
 - For "list my lights" or "what lights do I have": the reply must contain an actual list of light entities (e.g. light.living_room, light.bedroom) or a clear statement that there are no lights. A reply that only says "I can't reach Home Assistant" or explains how to fix config is NOT giving the user what they wanted.
-- If the assistant could not reach Home Assistant and therefore could not list lights, the user did NOT get what they wanted. Do not pass.
-- Only answer YES if the reply actually fulfills the request (real list of lights, or explicit no lights after a successful query). Answer NO if the reply is just an error explanation or setup instructions.
+- For "list all my devices" or "what devices do I have": the reply must show that Home Assistant was queried and returned entities—e.g. a list of entity IDs, a count like "you have 344 entities" with some examples, or a clear statement that there are no entities. Passing a subset or a summarized list (e.g. "device-like ones" with a few examples) is acceptable as long as it is clear the API returned data. Only fail if the reply does not show any entities or count from HA, or if it's just an error/setup message.
+- If the assistant could not reach Home Assistant and therefore could not list lights/devices, the user did NOT get what they wanted. Do not pass.
+- Only answer YES if the reply actually fulfills the request (real list, or explicit none after a successful query). Answer NO if the reply is just an error explanation or setup instructions.
 
 Answer with exactly one line: YES or NO. Then add one short sentence explaining why.`;
     const response = await chat([
@@ -153,6 +154,19 @@ async function main() {
       name: 'What lights do I have — LLM judge: user got what they wanted',
       run: async () => {
         const userMessage = 'What lights do I have?';
+        const { reply } = await runE2E(userMessage);
+        console.log('  Input:  ', userMessage);
+        console.log('  Output: ', reply ? reply.split('\n').join('\n           ') : '(empty)');
+        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR);
+        if (!pass) {
+          throw new Error(`Judge: user did not get what they wanted. ${reason || 'NO'}. Bot reply (first 400 chars): ${(reply || '').slice(0, 400)}`);
+        }
+      },
+    },
+    {
+      name: 'List all my devices — so we see at least something returned from the API',
+      run: async () => {
+        const userMessage = 'List all my devices';
         const { reply } = await runE2E(userMessage);
         console.log('  Input:  ', userMessage);
         console.log('  Output: ', reply ? reply.split('\n').join('\n           ') : '(empty)');
