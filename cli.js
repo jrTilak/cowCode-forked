@@ -159,6 +159,18 @@ if (sub === 'moo') {
     const child = spawn('tail', ['-f', logPath], { stdio: 'inherit' });
     child.on('close', (code) => process.exit(code ?? 0));
   }
+} else if (sub === 'index') {
+  const indexScript = join(INSTALL_DIR, 'scripts', 'index-cli.js');
+  if (!existsSync(indexScript)) {
+    console.error('cowcode: scripts/index-cli.js not found.');
+    process.exit(1);
+  }
+  const child = spawn(process.execPath, [indexScript, ...args.slice(1)], {
+    stdio: 'inherit',
+    env: { ...process.env, COWCODE_STATE_DIR: process.env.COWCODE_STATE_DIR },
+    cwd: INSTALL_DIR,
+  });
+  child.on('close', (code) => process.exit(code ?? 0));
 } else if (sub === 'skills') {
   const skillSub = args[1];
   const skillArg = args[2];
@@ -188,6 +200,7 @@ if (sub === 'moo') {
   console.log('Usage: cowcode moo start | stop | status | restart');
   console.log('       cowcode logs');
   console.log('       cowcode dashboard');
+  console.log('       cowcode index [--source memory] [--source filesystem] [--root <path>] [--limit N]');
   console.log('       cowcode auth [options]');
   console.log('       cowcode skills install <skill-id>');
   console.log('       cowcode update [--force]');
