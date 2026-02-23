@@ -19,6 +19,11 @@ NODE="$(command -v node 2>/dev/null || true)"
 INDEX_JS="$INSTALL_DIR/index.js"
 RUN_WITH_ENV="$INSTALL_DIR/scripts/run-with-env.sh"
 
+# Append a control line to daemon.log so "tail -f daemon.log" shows start/stop/restart
+daemon_log() {
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S')] cowcode moo $ACTION" >> "$STATE_DIR/daemon.log" 2>/dev/null || true
+}
+
 # macOS launchd
 LAUNCHD_LABEL="ai.cowcode.bot"
 PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
@@ -146,15 +151,18 @@ case "$OS" in
       start)
         pm2 start "$COWCODE_INSTALL_DIR/index.js" --name cowcode
         echo "Started with pm2. To see logs: pm2 logs cowcode"
+        daemon_log
         ;;
       stop)
         pm2 stop cowcode
+        daemon_log
         ;;
       status)
         pm2 status cowcode
         ;;
       restart)
         pm2 restart cowcode
+        daemon_log
         ;;
       *)
         echo "Usage: cowcode moo start|stop|status|restart"
@@ -169,9 +177,11 @@ case "$OS" in
         touch "$STATE_DIR/daemon.log" "$STATE_DIR/daemon.err" 2>/dev/null || true
         if launchctl list 2>/dev/null | grep -q "$LAUNCHD_LABEL"; then
           echo "Daemon is already running. Logs: $STATE_DIR/daemon.log"
+          daemon_log
         else
           if launchctl load "$PLIST"; then
             echo "Daemon started. Logs: $STATE_DIR/daemon.log"
+            daemon_log
           else
             echo "Daemon failed to start. Check the error above."
             exit 1
@@ -181,6 +191,7 @@ case "$OS" in
       stop)
         launchctl unload "$PLIST" 2>/dev/null || true
         echo "Daemon stopped."
+        daemon_log
         ;;
       status)
         if launchctl list 2>/dev/null | grep -q "$LAUNCHD_LABEL"; then
@@ -196,6 +207,7 @@ case "$OS" in
         ensure_plist
         launchctl load "$PLIST"
         echo "Daemon restarted."
+        daemon_log
         ;;
       *) echo "Usage: cowcode moo start|stop|status|restart"; exit 1 ;;
     esac
@@ -207,10 +219,12 @@ case "$OS" in
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable --now "$SERVICE_NAME" 2>/dev/null || systemctl --user start "$SERVICE_NAME"
         echo "Daemon started. Logs: journalctl --user -u $SERVICE_NAME -f"
+        daemon_log
         ;;
       stop)
         systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
         echo "Daemon stopped."
+        daemon_log
         ;;
       status)
         systemctl --user status "$SERVICE_NAME" 2>/dev/null || echo "Daemon is not running."
@@ -220,6 +234,7 @@ case "$OS" in
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user restart "$SERVICE_NAME"
         echo "Daemon restarted."
+        daemon_log
         ;;
       *) echo "Usage: cowcode moo start|stop|status|restart"; exit 1 ;;
     esac
