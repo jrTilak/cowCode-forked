@@ -16,6 +16,11 @@ STATE_DIR="$(cd "$STATE_DIR" && pwd)"
 touch "$STATE_DIR/daemon.log" "$STATE_DIR/daemon.err" 2>/dev/null || true
 NODE="$(command -v node 2>/dev/null || true)"
 [ -z "$NODE" ] && NODE="node"
+# Prefer full path for launchd (minimal PATH); fallback for when "node" is not in PATH
+if [ "$NODE" = "node" ] || [ -z "$NODE" ]; then
+  NODE="$(PATH="/usr/local/bin:/opt/homebrew/bin:$PATH" command -v node 2>/dev/null || true)"
+  [ -z "$NODE" ] && NODE="node"
+fi
 INDEX_JS="$INSTALL_DIR/index.js"
 RUN_WITH_ENV="$INSTALL_DIR/scripts/run-with-env.sh"
 
@@ -99,6 +104,8 @@ ensure_plist() {
     <string>${STATE_DIR}</string>
     <key>COWCODE_INSTALL_DIR</key>
     <string>${INSTALL_DIR}</string>
+    <key>NODE</key>
+    <string>${NODE}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
