@@ -523,6 +523,45 @@ app.patch('/api/config', (req, res) => {
   }
 });
 
+// ---- Chat with LLM (dashboard chat space) ----
+
+const CHAT_SCRIPT = join(INSTALL_DIR, 'scripts', 'chat-dashboard.js');
+
+app.post('/api/chat', (req, res) => {
+  const message = req.body?.message != null ? String(req.body.message).trim() : '';
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  if (!message) {
+    res.status(400).json({ error: 'message is required' });
+    return;
+  }
+  const payload = JSON.stringify({ message, history });
+  const child = spawn(process.execPath, [CHAT_SCRIPT], {
+    cwd: INSTALL_DIR,
+    stdio: ['pipe', 'pipe', 'inherit'],
+    env: { ...process.env, COWCODE_STATE_DIR: process.env.COWCODE_STATE_DIR, COWCODE_INSTALL_DIR: INSTALL_DIR },
+  });
+  let out = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { out += chunk; });
+  child.on('error', (err) => {
+    res.status(500).json({ error: err.message || String(err) });
+  });
+  child.on('exit', (code, signal) => {
+    const lastLine = out.trim().split('\n').filter(Boolean).pop() || '';
+    try {
+      const parsed = JSON.parse(lastLine);
+      if (parsed.error) {
+        res.status(500).json({ error: parsed.error });
+        return;
+      }
+      res.json({ reply: parsed.textToSend != null ? String(parsed.textToSend) : '' });
+    } catch (_) {
+      res.status(500).json({ error: lastLine.slice(0, 200) || 'Chat script produced invalid output' });
+    }
+  });
+  child.stdin.end(payload, 'utf8');
+});
+
 // ---- Soul / workspace MD files (SOUL.md, WhoAmI.md, MyHuman.md, MEMORY.md, memory/*.md) ----
 
 const SOUL_FILE_IDS = ['SOUL.md', 'WhoAmI.md', 'MyHuman.md', 'MEMORY.md'];
