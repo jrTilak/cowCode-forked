@@ -17,6 +17,7 @@ import { executeApplyPatch } from '../lib/executors/apply-patch.js';
 import { executeCore } from '../lib/executors/core.js';
 import { executeSpeech } from '../lib/executors/speech.js';
 import { executeHomeAssistant } from '../lib/executors/home-assistant.js';
+import { executeMe } from '../lib/executors/me.js';
 
 const EXECUTORS = {
   cron: executeCron,
@@ -32,6 +33,7 @@ const EXECUTORS = {
   'apply-patch': executeApplyPatch,
   core: executeCore,
   'home-assistant': executeHomeAssistant,
+  me: executeMe,
 };
 
 /** Core skill (shell commands) is disabled for everyone — not available. */
