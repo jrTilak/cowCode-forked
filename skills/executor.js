@@ -14,7 +14,8 @@ import { executeRead } from '../lib/executors/read.js';
 import { executeWrite } from '../lib/executors/write.js';
 import { executeEdit } from '../lib/executors/edit.js';
 import { executeApplyPatch } from '../lib/executors/apply-patch.js';
-import { executeCore } from '../lib/executors/core.js';
+import { executeGoRead } from '../lib/executors/go-read.js';
+import { executeGoWrite } from '../lib/executors/go-write.js';
 import { executeSpeech } from '../lib/executors/speech.js';
 import { executeHomeAssistant } from '../lib/executors/home-assistant.js';
 import { executeMe } from '../lib/executors/me.js';
@@ -31,24 +32,25 @@ const EXECUTORS = {
   write: executeWrite,
   edit: executeEdit,
   'apply-patch': executeApplyPatch,
-  core: executeCore,
+  'go-read': executeGoRead,
+  'go-write': executeGoWrite,
   'home-assistant': executeHomeAssistant,
   me: executeMe,
 };
 
-/** Core skill (shell commands) is disabled in group chats only; allowed in DMs and dashboard. */
-const CORE_SKILL_ID = 'core';
+/** go-read and go-write are disabled in group chats; allowed in DMs and dashboard. */
+const BLOCKED_IN_GROUP = new Set(['go-read', 'go-write']);
 
 /**
- * @param {string} skillId - cron | search | memory
+ * @param {string} skillId - cron | search | memory | go-read | go-write
  * @param {object} ctx - storePath, jid, workspaceDir, scheduleOneShot, startCron, isGroup
  * @param {object} args - Parsed LLM tool arguments
  * @param {string} [toolName] - For multi-tool skills (e.g. memory_search, memory_get)
  * @returns {Promise<string>}
  */
 export async function executeSkill(skillId, ctx, args, toolName) {
-  if (skillId === CORE_SKILL_ID && ctx?.isGroup) {
-    return JSON.stringify({ error: 'The core skill is not available in group chats.' });
+  if (BLOCKED_IN_GROUP.has(skillId) && ctx?.isGroup) {
+    return JSON.stringify({ error: `${skillId} is not available in group chats.` });
   }
   const run = EXECUTORS[skillId];
   if (!run) return JSON.stringify({ error: `Unknown skill: ${skillId}` });

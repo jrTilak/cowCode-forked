@@ -12,10 +12,7 @@ import { getGroupSkillsEnabled } from '../lib/group-config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Default skill ids enabled on new install and added by migration on update. */
-export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 'speech', 'gog', 'read', 'me'];
-
-/** Core commands (ls, cd, pwd, cat, less, cp, mv, rm, touch, chmod). Always loaded; no need to enable in config. */
-const CORE_SKILL_IDS = ['core'];
+export const DEFAULT_ENABLED = ['cron', 'search', 'browse', 'vision', 'memory', 'speech', 'gog', 'read', 'me', 'go-read', 'go-write'];
 
 const MD_NAMES = ['skill.md', 'SKILL.md'];
 const COMPACT_DESC_MAX = 280;
@@ -61,7 +58,11 @@ export function getSkillsEnabled() {
     const config = JSON.parse(raw);
     const skills = config.skills;
     if (!skills || typeof skills !== 'object') return DEFAULT_ENABLED;
-    return Array.isArray(skills.enabled) ? skills.enabled : DEFAULT_ENABLED;
+    let list = Array.isArray(skills.enabled) ? skills.enabled : DEFAULT_ENABLED;
+    if (list.includes('core')) {
+      list = list.filter((id) => id !== 'core').concat('go-read', 'go-write');
+    }
+    return list;
   } catch {
     return DEFAULT_ENABLED;
   }
@@ -77,9 +78,7 @@ export function getSkillsEnabled() {
 export function getSkillContext(options = {}) {
   const { groupNonOwner = false, groupJid } = options;
   const enabled = groupNonOwner ? getGroupSkillsEnabled(groupJid) : getSkillsEnabled();
-  const idsToLoad = groupNonOwner
-    ? enabled
-    : [...new Set([...enabled, ...CORE_SKILL_IDS])];
+  const idsToLoad = enabled;
   const compactEntries = [];
   const fullDocsById = Object.create(null);
   const available = [];
