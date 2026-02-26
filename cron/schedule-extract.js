@@ -68,8 +68,11 @@ function parseJsonReply(raw) {
   }
 }
 
+const MAX_SCHEDULE_RETRIES = 3;
+
 /**
  * Call LLM to interpret user message as a schedule request. Returns structured schedule or { schedule: false }.
+ * Retries up to MAX_SCHEDULE_RETRIES when the response is not valid JSON or missing required fields.
  * @param {string} userMessage
  * @param {Date} [now]
  * @returns {Promise<{ schedule: boolean, type?: string, message?: string, at?: string, cron?: string, tz?: string, times?: string[] } | null>}
@@ -90,16 +93,28 @@ export async function extractSchedule(userMessage, now = new Date()) {
     .replace('{{NOW_ISO}}', nowIso)
     .replace('{{NOW_READABLE}}', nowReadable + ` (${tz})`);
 
-  const raw = await llmChat([
+  let messages = [
     { role: 'system', content: system },
     { role: 'user', content: userMessage },
-  ]);
-  const parsed = parseJsonReply(raw);
-  const preview = typeof raw === 'string' ? raw.slice(0, 200).replace(/\s+/g, ' ') : '';
-  if (!parsed || typeof parsed.schedule !== 'boolean') {
-    console.log('[schedule extract] LLM response (first 200 chars):', preview);
-    console.log('[schedule extract] Parsed:', parsed == null ? 'null' : `schedule=${parsed.schedule} (typeof schedule=${typeof parsed?.schedule})`);
-    return null;
+  ];
+
+  for (let attempt = 0; attempt <= MAX_SCHEDULE_RETRIES; attempt++) {
+    const raw = await llmChat(messages);
+    const parsed = parseJsonReply(raw);
+    if (parsed && typeof parsed.schedule === 'boolean') return parsed;
+    const preview = typeof raw === 'string' ? raw.slice(0, 200).replace(/\s+/g, ' ') : '';
+    console.log('[schedule extract] attempt', attempt + 1, '— invalid response (first 200 chars):', preview);
+    if (attempt >= MAX_SCHEDULE_RETRIES) {
+      console.log('[schedule extract] Parsed:', parsed == null ? 'null' : `schedule=${parsed?.schedule} (typeof schedule=${typeof parsed?.schedule})`);
+      return null;
+    }
+    messages = messages.concat(
+      { role: 'assistant', content: typeof raw === 'string' ? raw : '' },
+      {
+        role: 'user',
+        content: 'Your previous reply was not valid. Respond with ONLY a single JSON object, no markdown, no code fence, no other text. Required: "schedule" must be true or false. If scheduling, include "type", "message", and "at" (ISO 8601) or "cron" as specified in the system prompt.',
+      }
+    );
   }
-  return parsed;
+  return null;
 }
