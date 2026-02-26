@@ -554,7 +554,9 @@ app.post('/api/chat', (req, res) => {
         res.status(500).json({ error: parsed.error });
         return;
       }
-      res.json({ reply: parsed.textToSend != null ? String(parsed.textToSend) : '' });
+      let reply = parsed.textToSend != null ? String(parsed.textToSend) : '';
+      reply = reply.replace(/(^|\n)\s*\[CowCode\]\s*/gi, '$1').trim();
+      res.json({ reply });
     } catch (_) {
       res.status(500).json({ error: lastLine.slice(0, 200) || 'Chat script produced invalid output' });
     }
