@@ -48,6 +48,7 @@ import { handleTelegramPrivateMessage } from './lib/telegram-private-handler.js'
 import { handleTelegramGroupMessage } from './lib/telegram-group-handler.js';
 import { ensureGroupConfigFor, readGroupMd } from './lib/group-config.js';
 import { loadGroupMd, buildGroupPromptBlock } from './lib/group-prompt.js';
+import { getGroupDisplayName, setGroupDisplayName, parseSetDisplayNameMessage } from './lib/group-display-names.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
 import { toUserMessage } from './lib/user-error.js';
 import { getSpeechConfig, transcribe, synthesizeToBuffer } from './lib/speech-client.js';
@@ -971,7 +972,15 @@ async function main() {
           }
         }
         const participant = m.key.participant || '';
-        const senderName = (m.pushName && String(m.pushName).trim()) || (participant ? participant.split('@')[0] || 'A group member' : 'A group member');
+        const preferredName = participant ? getGroupDisplayName('whatsapp', participant) : null;
+        const senderName = (preferredName && preferredName.trim()) || (m.pushName && String(m.pushName).trim()) || (participant ? participant.split('@')[0] || 'A group member' : 'A group member');
+        const setMyName = parseSetDisplayNameMessage(userText);
+        if (setMyName != null) {
+          if (participant) setGroupDisplayName('whatsapp', participant, setMyName);
+          const confirmText = `[CowCode] Got it, I'll call you ${setMyName} in the group.`;
+          sock.sendMessage(jid, { text: confirmText }).catch(() => pendingReplies.push({ jid, text: confirmText }));
+          continue;
+        }
         const mentionedJids = content?.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const groupMentioned = selfJid && Array.isArray(mentionedJids) && mentionedJids.some((id) => id && areJidsSameUser(id, selfJid));
         const textForAgent = `Message from ${senderName} in the group:\n\n${userText}`;
