@@ -45,19 +45,21 @@ export async function judgeUserGotWhatTheyWanted(userMessage, botReply, stateDir
 function buildDefaultJudgePrompt(userMessage, botReply, skillHint) {
   const criteria = {
     cron:
-      'For listing reminders: the reply should show a list or say there are no reminders. For adding a reminder: the reply should confirm it was scheduled. For removing: confirm removal or explain. Reply should be in the same language as the user (e.g. English).',
+      'The reply must deliver the actual outcome of the cron skill. For listing: show a real list of reminders or explicitly say there are no reminders. For adding: confirm the reminder was scheduled (time/description). For removing: confirm removal or explain what was removed. A reply that only explains reminders or offers to help without showing the outcome is NO. Reply should be in the same language as the user.',
     browser:
-      'For news/headlines: the reply should contain headlines, a summary, or current news. For search/navigate: the reply should address the query with relevant content. For non-news queries: the reply should not be only a generic news block.',
+      'The reply must deliver the requested content. For news/headlines: must contain headlines, a summary, or current news. For search/navigate: must contain relevant content from the search or page. For non-news queries: must answer with real content, not only a generic news block. A reply that says it cannot do it, or gives only setup/error text without the requested data, is NO.',
     memory:
-      'The bot has access to memory. If the user asked to recall something from a previous message, the reply should reference or state what was stored. If the bot says it does not know or does not have that information, answer NO.',
+      'The reply must show that memory was used. If the user asked to recall something: the reply must reference or state what was stored. If the bot says it does not know, does not have that information, or could not find it, answer NO. A reply that only explains memory without returning recalled content is NO.',
     write:
-      'For writing or creating a file: the reply should confirm the file was written, created, or saved (e.g. path, success). Refusing to write or an error without attempting the skill is NO.',
+      'The reply must confirm the file was written, created, or saved (e.g. path, filename, or clear success). A reply that refuses to write, only explains how to write, or errors without confirming the write happened is NO. Vague or unhelpful output is NO.',
     edit:
-      'For editing or replacing text in a file: the reply should confirm the edit was applied (e.g. replaced, updated). Refusing to edit or an error because the bot did not call the edit skill is NO.',
+      'The reply must confirm the edit was applied (e.g. replaced, updated, changed in file X). A reply that refuses to edit, only explains editing, or errors without confirming the edit happened is NO. Vague or unhelpful output is NO.',
     me:
-      'For "what do you know about me?" or profile: the reply should be a short profile, summary of notes/memory, or say there is little/no information. A friendly "I don\'t have much" or empty profile is YES. An error or refusing to use the me skill is NO.',
+      'The reply must contain actual substantive information about the user (e.g. from MEMORY.md or profile: name, preferences, projects, things learned). A reply that only says there are no details saved, nothing learned, no profile yet, or "I don\'t have any personal details about you" is NOT what the user wanted — answer NO. Pass (YES) only if the reply includes real profile or memory content about the user. An error or refusing to use the me skill is NO.',
+    'home-assistant':
+      'The reply must show that Home Assistant was queried and return real data. For "list my lights" or "what lights": must contain a list of light entities or a clear "no lights" after a successful query. For "list devices": must show entities, count, or examples from the API. A reply that only says it cannot reach HA, or gives setup/error without listing any entities, is NO.',
     skill:
-      'The reply should address what the user asked in a helpful way. If the user asked for specific data (e.g. a list), the reply should contain that or a clear explanation (e.g. "no items"). Error messages or setup instructions alone are not "what they wanted" unless the user asked for help.',
+      'The reply must deliver what the user asked for: real data (e.g. list, result), a clear outcome, or an explicit "no items" / "nothing found" where that is the correct answer. Polite non-answers, setup instructions alone, or vague text that does not fulfill the request are NO. Error messages are not "what they wanted" unless the user asked for help.',
   };
   const hint = criteria[skillHint] || criteria.skill;
   return `You are a test judge. The user asked:

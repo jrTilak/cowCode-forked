@@ -20,9 +20,8 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
-import dotenv from 'dotenv';
 import { runSkillTests } from './skill-test-runner.js';
-import { getEnvPath } from '../../lib/paths.js';
+import { judgeUserGotWhatTheyWanted } from './e2e-judge.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -91,48 +90,6 @@ function runE2E(userMessage) {
   });
 }
 
-/**
- * Ask an LLM (separately from the system under test) whether the user got what they wanted.
- * Pass only if the reply actually fulfills the request (e.g. lists lights), not just "acceptable" or helpful error text.
- * @param {string} userMessage - What the user asked (e.g. "list my lights").
- * @param {string} botReply - The reply the bot produced.
- * @param {string} stateDir - State dir for config/env (LLM API key etc.).
- * @returns {Promise<{ pass: boolean, reason?: string }>}
- */
-async function judgeUserGotWhatTheyWanted(userMessage, botReply, stateDir) {
-  const prevStateDir = process.env.COWCODE_STATE_DIR;
-  process.env.COWCODE_STATE_DIR = stateDir;
-  try {
-    dotenv.config({ path: getEnvPath() });
-    const { chat } = await import('../../llm.js');
-    const judgePrompt = `You are a test judge. A user asked the assistant:
-
-"${userMessage}"
-
-The assistant replied:
-
----
-${botReply}
----
-Did the user GET WHAT THEY WANTED? Requirements:
-- For "list my lights" or "what lights do I have": the reply must contain an actual list of light entities (e.g. light.living_room, light.bedroom) or a clear statement that there are no lights. A reply that only says "I can't reach Home Assistant" or explains how to fix config is NOT giving the user what they wanted.
-- For "list all my devices" or "what devices do I have": the reply must show that Home Assistant was queried and returned entities—e.g. a list of entity IDs, a count like "you have 344 entities" with some examples, or a clear statement that there are no entities. Passing a subset or a summarized list (e.g. "device-like ones" with a few examples) is acceptable as long as it is clear the API returned data. Only fail if the reply does not show any entities or count from HA, or if it's just an error/setup message.
-- If the assistant could not reach Home Assistant and therefore could not list lights/devices, the user did NOT get what they wanted. Do not pass.
-- Only answer YES if the reply actually fulfills the request (real list, or explicit none after a successful query). Answer NO if the reply is just an error explanation or setup instructions.
-
-Answer with exactly one line: YES or NO. Then add one short sentence explaining why.`;
-    const response = await chat([
-      { role: 'user', content: judgePrompt },
-    ]);
-    const trimmed = (response || '').trim().toUpperCase();
-    const pass = trimmed.startsWith('YES');
-    return { pass, reason: (response || '').trim().slice(0, 600) };
-  } finally {
-    if (prevStateDir !== undefined) process.env.COWCODE_STATE_DIR = prevStateDir;
-    else delete process.env.COWCODE_STATE_DIR;
-  }
-}
-
 async function main() {
   ensureHomeAssistantEnabled();
 
@@ -142,7 +99,7 @@ async function main() {
       run: async () => {
         const userMessage = 'list my lights';
         const { reply } = await runE2E(userMessage);
-        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR);
+        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR, { skillHint: 'home-assistant' });
         if (!pass) {
           const err = new Error(`Judge: user did not get what they wanted. ${reason || 'NO'}. Bot reply (first 400 chars): ${(reply || '').slice(0, 400)}`);
           err.reply = reply;
@@ -156,7 +113,7 @@ async function main() {
       run: async () => {
         const userMessage = 'What lights do I have?';
         const { reply } = await runE2E(userMessage);
-        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR);
+        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR, { skillHint: 'home-assistant' });
         if (!pass) {
           const err = new Error(`Judge: user did not get what they wanted. ${reason || 'NO'}. Bot reply (first 400 chars): ${(reply || '').slice(0, 400)}`);
           err.reply = reply;
@@ -170,7 +127,7 @@ async function main() {
       run: async () => {
         const userMessage = 'List all my devices';
         const { reply } = await runE2E(userMessage);
-        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR);
+        const { pass, reason } = await judgeUserGotWhatTheyWanted(userMessage, reply, DEFAULT_STATE_DIR, { skillHint: 'home-assistant' });
         if (!pass) {
           const err = new Error(`Judge: user did not get what they wanted. ${reason || 'NO'}. Bot reply (first 400 chars): ${(reply || '').slice(0, 400)}`);
           err.reply = reply;
