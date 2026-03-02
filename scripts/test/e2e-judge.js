@@ -40,7 +40,7 @@ export async function judgeUserGotWhatTheyWanted(userMessage, botReply, stateDir
 /**
  * @param {string} userMessage
  * @param {string} botReply
- * @param {string} skillHint - 'cron' | 'browser' | 'memory' | 'write' | 'edit' | 'me' | 'skill'
+ * @param {string} skillHint - 'cron' | 'browser' | 'memory' | 'write' | 'edit' | 'me' | 'home-assistant' | 'vision' | 'apply-patch' | 'read' | 'go-read' | 'core' | 'go-write' | 'search' | 'speech' | 'gog' | 'skill'
  */
 function buildDefaultJudgePrompt(userMessage, botReply, skillHint) {
   const criteria = {
@@ -58,6 +58,24 @@ function buildDefaultJudgePrompt(userMessage, botReply, skillHint) {
       'The reply must contain actual substantive information about the user (e.g. from MEMORY.md or profile: name, preferences, projects, things learned). A reply that only says there are no details saved, nothing learned, no profile yet, or "I don\'t have any personal details about you" is NOT what the user wanted — answer NO. Pass (YES) only if the reply includes real profile or memory content about the user. An error or refusing to use the me skill is NO.',
     'home-assistant':
       'The reply must show that Home Assistant was queried and return real data. For "list my lights" or "what lights": must contain a list of light entities or a clear "no lights" after a successful query. For "list devices": must show entities, count, or examples from the API. A reply that only says it cannot reach HA, or gives setup/error without listing any entities, is NO.',
+    vision:
+      'The reply must reflect that the vision skill was used. For describe: must contain a description of the image or state that the image was analyzed. For generate: must confirm the image was created/saved or sent (path, "created", "sent", or similar). A reply that only explains the skill or refuses without trying is NO.',
+    'apply-patch':
+      'The reply must confirm the patch was applied (e.g. file updated, patch applied, change made). A reply that refuses to apply, only explains patching, or errors without confirming the edit happened is NO.',
+    read:
+      'The reply must contain actual file contents or a clear summary of what was read (or state that the file was read). A reply that refuses to read, only explains the read skill, or errors without showing content is NO.',
+    'go-read':
+      'The reply must show the result of the command: listing of files/dirs, file contents, or current path. A reply that refuses, only explains the skill, or errors without showing the requested data is NO.',
+    core:
+      'The reply must show the result of the core command: listing, file contents, path, or confirmation of the operation. A reply that refuses, only explains, or errors without delivering the result is NO.',
+    'go-write':
+      'The reply must confirm the filesystem change (file created, copied, moved, removed, or permissions changed). A reply that refuses or errors without confirming the operation is NO.',
+    search:
+      'The reply must deliver search or navigation results: real content from the web (time, weather, snippet, or page content). A reply that only says it cannot search, or gives setup/error without any fetched content, is NO.',
+    speech:
+      'The reply must reflect that the speech skill was used: for transcribe, the transcript or summary; for synthesize/reply_as_voice, confirmation that audio was generated or sent. A reply that only explains the skill or refuses without trying is NO. If the user asked for voice and the bot clearly could not (e.g. not configured), a short explanation is acceptable only if no voice was requested as the main goal.',
+    gog:
+      'The reply must show that gog was used: real data from Gmail/Calendar/Drive/etc., or a clear "no results" / empty list. A reply that only says it cannot use gog, or gives setup/error without attempting the requested action, is NO. If not configured, a brief explanation is acceptable.',
     skill:
       'The reply must deliver what the user asked for: real data (e.g. list, result), a clear outcome, or an explicit "no items" / "nothing found" where that is the correct answer. Polite non-answers, setup instructions alone, or vague text that does not fulfill the request are NO. Error messages are not "what they wanted" unless the user asked for help.',
   };

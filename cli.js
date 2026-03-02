@@ -112,7 +112,33 @@ if (sub === 'moo') {
       try {
         unlinkSync(tmpScript);
       } catch (_) {}
-      process.exit(code ?? 0);
+      if (code !== 0) {
+        process.exit(code);
+        return;
+      }
+      // After successful force update: restart moo and run dashboard so user doesn't forget
+      console.log('');
+      console.log('  Restarting bot and starting dashboard...');
+      const daemonScript = join(INSTALL_DIR, 'scripts', 'daemon.sh');
+      if (existsSync(daemonScript)) {
+        const restartResult = spawnSync('bash', [daemonScript, 'restart'], {
+          stdio: 'inherit',
+          env: { ...process.env, COWCODE_INSTALL_DIR: INSTALL_DIR },
+          cwd: INSTALL_DIR,
+        });
+        if (restartResult.status !== 0) {
+          console.error('  (moo restart had issues; you can run: cowcode moo restart)');
+        }
+      }
+      const serverPath = join(INSTALL_DIR, 'dashboard', 'server.js');
+      if (existsSync(serverPath)) {
+        spawnSync(process.execPath, [join(INSTALL_DIR, 'cli.js'), 'dashboard'], {
+          stdio: 'inherit',
+          env: { ...process.env, COWCODE_INSTALL_DIR: INSTALL_DIR },
+          cwd: INSTALL_DIR,
+        });
+      }
+      process.exit(0);
     });
   } else {
     const script = join(INSTALL_DIR, 'update.sh');

@@ -1,29 +1,41 @@
 /**
- * E2E tests for the me skill through the main chatting interface.
- * See scripts/test/E2E.md. Flow: user message → LLM → me skill → reply → judge.
- * Uses fixed fixture state (scripts/test/fixtures/state) so the bot has profile data to return.
+ * E2E tests for the vision skill through the main chatting interface.
+ * See scripts/test/E2E.md. Flow: user message → LLM → vision skill → reply → judge.
+ * Covers generate (and optionally describe when image is provided).
  */
 
 import { spawn } from 'child_process';
+import { mkdirSync, existsSync, copyFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir, tmpdir } from 'os';
 import { runSkillTests } from './skill-test-runner.js';
 import { judgeUserGotWhatTheyWanted } from './e2e-judge.js';
-import { prepareStateFromFixture } from './test-fixture-state.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
+const DEFAULT_STATE_DIR = process.env.COWCODE_STATE_DIR || join(homedir(), '.cowcode');
 
 const E2E_REPLY_MARKER_START = 'E2E_REPLY_START';
 const E2E_REPLY_MARKER_END = 'E2E_REPLY_END';
 const PER_TEST_TIMEOUT_MS = 120_000;
 
-const ME_QUERIES = [
-  'What do you know about me?',
-  'Summarize what you know about me',
-  'What have you learned about me?',
-  'Tell me about myself',
+const VISION_QUERIES = [
+  'Generate a simple image of a blue circle and tell me when it is done.',
+  'Create an image of a sunset and confirm you created it.',
 ];
+
+function createTempStateDir() {
+  const stateDir = join(tmpdir(), 'cowcode-vision-e2e-' + Date.now());
+  mkdirSync(join(stateDir, 'workspace'), { recursive: true });
+  if (existsSync(join(DEFAULT_STATE_DIR, 'config.json'))) {
+    copyFileSync(join(DEFAULT_STATE_DIR, 'config.json'), join(stateDir, 'config.json'));
+  }
+  if (existsSync(join(DEFAULT_STATE_DIR, '.env'))) {
+    copyFileSync(join(DEFAULT_STATE_DIR, '.env'), join(stateDir, '.env'));
+  }
+  return stateDir;
+}
 
 function runE2E(userMessage, opts = {}) {
   const env = { ...process.env };
@@ -72,18 +84,17 @@ function runE2E(userMessage, opts = {}) {
 }
 
 async function main() {
-  console.log('E2E tests: me skill (user message → LLM → me → reply → judge).');
-  console.log('Using fixed fixture state (fixtures/state) so the bot has profile data.\n');
+  console.log('E2E tests: vision skill (user message → LLM → vision → reply → judge).');
   console.log('Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.\n');
 
-  const stateDir = prepareStateFromFixture();
+  const stateDir = createTempStateDir();
 
-  const tests = ME_QUERIES.map((query) => ({
-    name: `me: "${query}"`,
+  const tests = VISION_QUERIES.map((query) => ({
+    name: `vision: "${query.slice(0, 50)}…"`,
     run: async () => {
       const result = await runE2E(query, { stateDir });
       const reply = result.reply ?? result;
-      const { pass, reason } = await judgeUserGotWhatTheyWanted(query, reply, stateDir, { skillHint: 'me' });
+      const { pass, reason } = await judgeUserGotWhatTheyWanted(query, reply, stateDir, { skillHint: 'vision' });
       if (!pass) {
         const err = new Error(`Judge: ${reason || 'NO'}. Reply (first 400): ${(reply || '').slice(0, 400)}`);
         err.reply = reply;
@@ -94,7 +105,7 @@ async function main() {
     },
   }));
 
-  const { failed } = await runSkillTests('me', tests);
+  const { failed } = await runSkillTests('vision', tests);
   process.exit(failed > 0 ? 1 : 0);
 }
 

@@ -54,3 +54,12 @@ Each skill test has its own folder with an **inputs.md** that lists the test fil
 | [memory/](memory/inputs.md) | `test-memory-e2e.js` | Store phrase + recall query |
 | [me/](me/inputs.md) | `test-me-e2e.js` | Me/memory queries |
 | [home-assistant/](home-assistant/inputs.md) | `test-home-assistant-e2e.js` | HA queries |
+| [vision/](vision/inputs.md) | `test-vision-e2e.js` | Generate image queries |
+| [apply-patch/](apply-patch/inputs.md) | `test-apply-patch-e2e.js` | Patch/add/replace file |
+| [read/](read/inputs.md) | `test-read-e2e.js` | Read file contents |
+| [go-read/](go-read/inputs.md) | `test-go-read-e2e.js` | ls, pwd, cat |
+| [core/](core/inputs.md) | `test-core-e2e.js` | ls, pwd, cat |
+| [go-write/](go-write/inputs.md) | `test-go-write-e2e.js` | touch, cp |
+| [search/](search/inputs.md) | `test-search-e2e.js` | Search / weather / time |
+| [speech/](speech/inputs.md) | `test-speech-e2e.js` | Synthesize / reply as voice |
+| [gog/](gog/inputs.md) | `test-gog-e2e.js` | Calendar / Gmail |

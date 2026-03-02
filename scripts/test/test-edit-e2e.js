@@ -1,20 +1,19 @@
 /**
  * E2E tests for the edit skill through the main chatting interface.
  * See scripts/test/E2E.md. Flow: user message → LLM → edit skill → reply → judge.
- * Uses a temp state dir; pre-creates a file in workspace for the bot to edit.
+ * Uses fixed fixture state (fixtures/state) which includes workspace/e2e-edit-target.txt.
  */
 
 import { spawn } from 'child_process';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir, tmpdir } from 'os';
 import { runSkillTests } from './skill-test-runner.js';
 import { judgeUserGotWhatTheyWanted } from './e2e-judge.js';
+import { prepareStateFromFixture } from './test-fixture-state.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
-const DEFAULT_STATE_DIR = process.env.COWCODE_STATE_DIR || join(homedir(), '.cowcode');
 
 const E2E_REPLY_MARKER_START = 'E2E_REPLY_START';
 const E2E_REPLY_MARKER_END = 'E2E_REPLY_END';
@@ -28,20 +27,6 @@ const EDIT_QUERIES = [
   `In the file ${EDIT_TARGET_FILE} change world to planet`,
   `Edit ${EDIT_TARGET_FILE}: replace "Edit this line" with "Edited line"`,
 ];
-
-function createTempStateDir() {
-  const stateDir = join(tmpdir(), 'cowcode-edit-e2e-' + Date.now());
-  const workspaceDir = join(stateDir, 'workspace');
-  mkdirSync(workspaceDir, { recursive: true });
-  writeFileSync(join(workspaceDir, EDIT_TARGET_FILE), EDIT_INITIAL_CONTENT, 'utf8');
-  if (existsSync(join(DEFAULT_STATE_DIR, 'config.json'))) {
-    copyFileSync(join(DEFAULT_STATE_DIR, 'config.json'), join(stateDir, 'config.json'));
-  }
-  if (existsSync(join(DEFAULT_STATE_DIR, '.env'))) {
-    copyFileSync(join(DEFAULT_STATE_DIR, '.env'), join(stateDir, '.env'));
-  }
-  return { stateDir, workspaceDir };
-}
 
 function runE2E(userMessage, opts = {}) {
   const env = { ...process.env };
@@ -91,9 +76,10 @@ function runE2E(userMessage, opts = {}) {
 
 async function main() {
   console.log('E2E tests: edit skill (user message → LLM → edit → reply → judge).');
-  console.log('Pre-created file:', EDIT_TARGET_FILE, 'in temp workspace. Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.\n');
+  console.log('Using fixed fixture state; target file:', EDIT_TARGET_FILE, '. Timeout per test:', PER_TEST_TIMEOUT_MS / 1000, 's.\n');
 
-  const { stateDir, workspaceDir } = createTempStateDir();
+  const stateDir = prepareStateFromFixture();
+  const workspaceDir = join(stateDir, 'workspace');
   const targetPath = join(workspaceDir, EDIT_TARGET_FILE);
 
   function resetEditTarget() {
