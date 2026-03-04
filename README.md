@@ -81,9 +81,9 @@ Everything stays on your computer.
 
 ---
 
-# 🌊 Tide (periodic check)
+# 🌊 Tide (follow-up after silence)
 
-Tide runs the agent after the chat has been quiet for a while (no user message needed). Configure in `~/.cowcode/config.json`:
+Tide sends **one** follow-up per conversation round when the user doesn't reply. Configure in `~/.cowcode/config.json`:
 
 ```json
 "tide": {
@@ -94,7 +94,7 @@ Tide runs the agent after the chat has been quiet for a while (no user message n
 }
 ```
 
-* **enabled** — Tide is in the default config but off (`false`). Set to `true` to enable.
+* **enabled** — Off by default (`false`). Set to `true` to enable.
 * **silenceCooldownMinutes** — Both how often we check and how long the chat must be silent before pinging (default 30). We only wake up every N minutes and only send if there’s been no message in or out for at least N minutes.
 * **jid** — Where to send the agent’s reply (your WhatsApp JID or Telegram chat id). If omitted, Tide auto-detects: with Telegram it uses the bot owner's private chat (config.owner.telegramUserId), or the most recently active private chat. Set only to override (e.g. a specific WhatsApp JID).
 * **inactiveStart** — 24h time (e.g. `"23:00"`). Tide will not run at or after this time (in your local timezone from `agents.defaults.userTimezone`).

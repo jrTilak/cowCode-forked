@@ -11,7 +11,7 @@ import { loadJobs, removeJob, updateJob } from './store.js';
 import { isTelegramChatId } from '../lib/telegram.js';
 import { addPending as addPendingTelegram } from '../lib/pending-telegram.js';
 import { getCronStorePath, getWorkspaceDir } from '../lib/paths.js';
-import { toUserMessage } from '../lib/user-error.js';
+import { toUserMessage, getErrorMessageForLog } from '../lib/user-error.js';
 import { appendExchange } from '../lib/chat-log.js';
 import { getMemoryConfig } from '../lib/memory-config.js';
 import { indexChatExchange } from '../lib/memory-index.js';
@@ -40,7 +40,7 @@ async function sendCronReply(jid, text) {
       await currentTelegramBot.sendMessage(jid, text);
     } catch (e) {
       addPendingTelegram(String(jid), text);
-      console.log('[cron] Telegram reply queued (send failed, will retry on next message):', e.message);
+      console.log('[cron] Telegram reply queued (send failed, will retry on next message):', getErrorMessageForLog(e));
       return;
     }
   } else if (currentSock && typeof currentSock.sendMessage === 'function') {
