@@ -33,9 +33,9 @@ import { spawn } from 'child_process';
 import pino from 'pino';
 import { startCron, stopCron, scheduleOneShot, runPastDueOneShots } from './cron/runner.js';
 import { getSkillsEnabled, getSkillContext, DEFAULT_ENABLED } from './skills/loader.js';
-import { initBot, createTelegramSock, isTelegramChatId, isTelegramGroupJid } from './lib/telegram.js';
+import { initBot, createTelegramSock, isTelegramChatId, isTelegramGroupJid, sendLongText } from './lib/telegram.js';
 import { isWhatsAppGroupJid } from './lib/whatsapp.js';
-import { addPending as addPendingTelegram, clearPending as clearPendingTelegram } from './lib/pending-telegram.js';
+import { addPending as addPendingTelegram, clearPending as clearPendingTelegram, flushPending } from './lib/pending-telegram.js';
 import { getChannelsConfig } from './lib/channels-config.js';
 import { getSchedulingTimeContext, isInTideInactiveWindow } from './lib/timezone.js';
 import { getOwnerConfig, isOwner } from './lib/owner-config.js';
@@ -43,14 +43,14 @@ import { getGroupAddedBy, setGroupAddedBy } from './lib/telegram-group-added-by.
 import { isTelegramGroup } from './lib/group-guard.js';
 import { getMemoryConfig } from './lib/memory-config.js';
 import { indexChatExchange } from './lib/memory-index.js';
-import { appendExchange, appendGroupExchange, getLastExchangeTimestamp, getPrivateChatJidsByLastActivity, readLastGroupExchanges, readLastPrivateExchanges } from './lib/chat-log.js';
+import { appendExchange, appendGroupExchange, readLastGroupExchanges, readLastPrivateExchanges } from './lib/chat-log.js';
 import { handleTelegramPrivateMessage } from './lib/telegram-private-handler.js';
 import { handleTelegramGroupMessage } from './lib/telegram-group-handler.js';
 import { ensureGroupConfigFor, readGroupMd } from './lib/group-config.js';
 import { loadGroupMd, buildGroupPromptBlock } from './lib/group-prompt.js';
 import { getGroupDisplayName, setGroupDisplayName, parseSetDisplayNameMessage } from './lib/group-display-names.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
-import { toUserMessage } from './lib/user-error.js';
+import { toUserMessage, getErrorMessageForLog } from './lib/user-error.js';
 import { getSpeechConfig, transcribe, synthesizeToBuffer } from './lib/speech-client.js';
 import { createRequire } from 'module';
 
@@ -373,6 +373,9 @@ async function main() {
     sock = null; // will be set by connectWhatsApp() in the reconnect loop below
   }
 
+  /** Current WhatsApp sock for Tide follow-ups (set when connection opens in runBot). */
+  const whatsappSockRef = { current: null };
+
   /** Set in runBot (WhatsApp: initBot; Telegram-only: opts); null in --test so cron ctx does not throw. */
   let telegramBot = null;
 
@@ -430,41 +433,28 @@ async function main() {
 
   // Agent logic: getSkillContext() called on every run; compact list in tool; full doc injected when a skill is called.
 
-  /** Tide: periodic check in its own process (does not block chat). Reply sent to resolved jid (config, owner, or most recent private chat). */
-  let tideIntervalId = null;
-  function getTideJidResolved(config, workspaceDir) {
-    const fromConfig = config.tide?.jid != null && String(config.tide.jid).trim();
-    if (fromConfig) return fromConfig;
-    const channelsConfig = getChannelsConfig();
-    if (channelsConfig.telegram?.enabled) {
-      const owner = getOwnerConfig();
-      if (owner.telegramUserId != null) return String(owner.telegramUserId);
-    }
-    const byActivity = getPrivateChatJidsByLastActivity(workspaceDir);
-    const telegramLike = byActivity.find((x) => /^\d+$/.test(String(x.jid).trim()));
-    return telegramLike ? String(telegramLike.jid).trim() : null;
-  }
-  async function runTide() {
-    let config = {};
+  /** Tide: one follow-up per "round". When we reply to a private chat, we schedule a single follow-up after silenceCooldownMinutes. If the user replies before then, the timer is cleared and a new one set after our next reply. If they don't reply, we send one follow-up and do not message again until they reply. */
+  const tideTimerByJid = new Map();
+  function getTideConfig() {
     try {
       const raw = readFileSync(getConfigPath(), 'utf8');
-      if (raw?.trim()) config = JSON.parse(raw);
+      if (raw?.trim()) return JSON.parse(raw);
     } catch (_) {}
+    return {};
+  }
+  async function runTideForJid(tideJid) {
+    tideTimerByJid.delete(tideJid);
+    const tideJidShort = String(tideJid).slice(0, 20) + (String(tideJid).length > 20 ? '…' : '');
+    let config = getTideConfig();
     const tide = config.tide || {};
     if (!tide.enabled) return;
     const inactiveStart = tide.inactiveStart && String(tide.inactiveStart).trim();
     const inactiveEnd = tide.inactiveEnd && String(tide.inactiveEnd).trim();
     if (inactiveStart && inactiveEnd && isInTideInactiveWindow(inactiveStart, inactiveEnd)) return;
-    const tideJid = getTideJidResolved(config, getWorkspaceDir());
-    if (!tideJid || !sock?.sendMessage) return;
-    const silenceCooldownMinutes = Math.max(0, Number(tide.silenceCooldownMinutes));
-    if (silenceCooldownMinutes > 0) {
-      const lastTs = getLastExchangeTimestamp(getWorkspaceDir(), tideJid);
-      if (lastTs != null) {
-        const quietMs = Date.now() - lastTs;
-        if (quietMs < silenceCooldownMinutes * 60 * 1000) return;
-      }
-    }
+    const isTgJid = isTelegramChatId(tideJid);
+    const waSock = whatsappSockRef.current;
+    if (isTgJid && !telegramBot) return;
+    if (!isTgJid && !waSock?.sendMessage) return;
     const historyMessages = readLastPrivateExchanges(getWorkspaceDir(), tideJid, 5);
     if (historyMessages.length >= 2) {
       const lastUserMsg = historyMessages[historyMessages.length - 2];
@@ -509,18 +499,25 @@ async function main() {
         child.stdin.end(payload, 'utf8');
       });
     } catch (e) {
-      console.error('[tide]', e.message);
+      console.error('[tide] run-tide failed:', getErrorMessageForLog(e));
       return;
     }
     const rawText = (textToSend || '').trim();
     const text = isTelegramChatId(tideJid) ? rawText.replace(/^\[CowCode\]\s*/i, '').trim() : rawText;
     const nothingPhrases = /^(nothing|n\/?a|no(ne)?\s*to\s*do|all\s*good|nothing\s*to\s*report\.?)\s*\.?$/i;
-    if (!text || (text.length < 50 && nothingPhrases.test(text))) return;
+    if (!text || (text.length < 50 && nothingPhrases.test(text))) {
+      console.log('[tide] Nothing to send for', tideJidShort, '(agent said nothing to do)');
+      return;
+    }
     try {
-      await sock.sendMessage(tideJid, { text });
-      console.log('[tide] Sent to', tideJid.slice(0, 20) + (tideJid.length > 20 ? '…' : ''));
+      if (isTgJid && telegramBot) {
+        await sendLongText(telegramBot, Number(tideJid), text);
+      } else if (waSock?.sendMessage) {
+        await waSock.sendMessage(tideJid, { text });
+      }
+      console.log('[tide] Follow-up sent to', tideJidShort);
     } catch (e) {
-      console.error('[tide] Send failed:', e.message);
+      console.error('[tide] Send failed:', getErrorMessageForLog(e));
     }
     const exchange = { user: 'Tide check', assistant: text, timestampMs: Date.now(), jid: tideJid };
     try {
@@ -534,30 +531,50 @@ async function main() {
       console.error('[tide] Chat log write failed:', err.message);
     }
   }
-  function startTide(sockRef, selfJidRef) {
-    let config = {};
-    try {
-      const raw = readFileSync(getConfigPath(), 'utf8');
-      if (raw?.trim()) config = JSON.parse(raw);
-    } catch (_) {}
+  function scheduleTideFollowUp(jid) {
+    console.log('[tide] scheduleTideFollowUp called for', String(jid).slice(0, 24));
+    const config = getTideConfig();
     const tide = config.tide || {};
-    if (!tide.enabled) return;
-    if (tideIntervalId) clearInterval(tideIntervalId);
+    if (!tide.enabled) {
+      console.log('[tide] Skipped (tide.enabled is false in config)');
+      return;
+    }
+    const inactiveStart = tide.inactiveStart && String(tide.inactiveStart).trim();
+    const inactiveEnd = tide.inactiveEnd && String(tide.inactiveEnd).trim();
+    if (inactiveStart && inactiveEnd && isInTideInactiveWindow(inactiveStart, inactiveEnd)) return;
     const cooldownMinutes = Math.max(1, Number(tide.silenceCooldownMinutes) || 30);
-    const intervalMs = cooldownMinutes * 60 * 1000;
-    tideIntervalId = setInterval(() => {
-      runTide().catch((e) => console.error('[tide]', e.message));
-    }, intervalMs);
-    const resolvedJid = getTideJidResolved(config, getWorkspaceDir());
-    const jidLog = resolvedJid ? ' → ' + String(resolvedJid).slice(0, 25) + '…' : ' (jid auto-detected at run time from owner or recent chat)';
-    console.log('[tide] Started: cooldown', cooldownMinutes, 'min' + jidLog);
+    const existing = tideTimerByJid.get(jid);
+    if (existing?.timeoutId) clearTimeout(existing.timeoutId);
+    const jidShort = String(jid).slice(0, 20) + (String(jid).length > 20 ? '…' : '');
+    if (existing?.timeoutId) {
+      console.log('[tide] Timer reset for', jidShort, '— follow-up in', cooldownMinutes, 'min');
+    } else {
+      console.log('[tide] Scheduled follow-up for', jidShort, 'in', cooldownMinutes, 'min');
+    }
+    const timeoutId = setTimeout(() => {
+      tideTimerByJid.delete(jid);
+      console.log('[tide] Sending follow-up to', jidShort);
+      runTideForJid(jid).catch((e) => console.error('[tide]', getErrorMessageForLog(e)));
+    }, cooldownMinutes * 60 * 1000);
+    tideTimerByJid.set(jid, { timeoutId });
+  }
+  function startTide(sockRef, selfJidRef) {
+    console.log('[tide] startTide() called');
+    const config = getTideConfig();
+    const tide = config.tide || {};
+    if (!tide.enabled) {
+      console.log('[tide] Disabled. Set tide.enabled to true in config for follow-ups after private replies.');
+      return;
+    }
+    const cooldownMinutes = Math.max(1, Number(tide.silenceCooldownMinutes) || 30);
+    console.log('[tide] Enabled. One follow-up per private reply after', cooldownMinutes, 'min of no reply.');
   }
   function stopTide() {
-    if (tideIntervalId) {
-      clearInterval(tideIntervalId);
-      tideIntervalId = null;
-      console.log('[tide] Stopped.');
+    for (const [, entry] of tideTimerByJid) {
+      if (entry?.timeoutId) clearTimeout(entry.timeoutId);
     }
+    tideTimerByJid.clear();
+    console.log('[tide] Stopped.');
   }
 
   const WHO_AM_I_MD = 'WhoAmI.md';
@@ -834,6 +851,7 @@ async function main() {
           }
         }
         console.log('[replied]', toolsForRequest.length > 0 ? '(agent + skills)' : '(chat)');
+        if (!isGroupJid) scheduleTideFollowUp(jid);
         const alreadySentBioPrompt = bioOpts.bioPromptSentJids?.has(jid);
         if (bioOpts.pendingBioConfirmJids != null && !isBioSet() && !alreadySentBioPrompt) {
           try {
@@ -849,13 +867,15 @@ async function main() {
         }
       } catch (sendErr) {
         lastSentByJidMap.set(jid, replyText); // E2E can still assert on intended reply when send fails
+        const errMsg = getErrorMessageForLog(sendErr);
         if (!isTelegramChatId(jid)) {
           pendingReplies.push({ jid, text: replyText });
-          console.log('[replied] queued (send failed, will retry after reconnect):', sendErr.message);
+          console.log('[replied] queued (send failed, will retry after reconnect):', errMsg);
         } else {
           addPendingTelegram(jid, replyText);
-          console.log('[replied] Telegram queued (send failed, will retry on next message):', sendErr.message);
+          console.log('[replied] Telegram queued (send failed, will retry on next message):', errMsg);
         }
+        if (!isGroupJid) scheduleTideFollowUp(jid);
       }
     }
   return { skillsCalled: skillsCalled || [] };
@@ -896,6 +916,7 @@ async function main() {
     const telegramToken = channelsConfig.telegram.botToken;
     const telegramBot = initBot(telegramToken);
     const telegramSock = createTelegramSock(telegramBot);
+    sock = telegramSock; // Tide needs sock for transport; in Telegram-only this is the Telegram sock
     console.log('');
     console.log('  ─────────────────────────────────────────');
     console.log('  Running in Telegram-only mode');
@@ -906,6 +927,7 @@ async function main() {
   }
 
   async function runBot(sock, opts = {}) {
+    console.log('[tide] runBot entered');
     const { telegramOnly, telegramBot: optsTelegramBot } = opts;
     if (telegramOnly && optsTelegramBot) {
       telegramBot = optsTelegramBot;
@@ -927,6 +949,7 @@ async function main() {
         getUploadsDir,
         transcribe,
         clearPendingTelegram,
+        flushPendingTelegram: (chatId) => flushPending(chatId, optsTelegramBot),
         addPendingTelegram,
         getOwnerConfig,
         isOwner,
@@ -971,11 +994,13 @@ async function main() {
       telegramBot = initBot(telegramToken);
       telegramSock = createTelegramSock(telegramBot);
       console.log('  Telegram bot enabled.');
-      console.log('');
+      console.log('[tide] Calling startTide (Telegram path)');
+      startTide(telegramSock, null);
     }
 
     sock.ev.on('connection.update', (u) => {
     if (u.connection === 'open') {
+      whatsappSockRef.current = sock;
       console.log('  [connection] connection successful');
       writeDaemonStarted();
       const sid = sock.user?.id ?? selfJid;
@@ -993,6 +1018,7 @@ async function main() {
       }
     }
     if (u.connection === 'close') {
+      whatsappSockRef.current = null;
       stopCron();
       stopTide();
       const reason = u.lastDisconnect?.error;
@@ -1246,6 +1272,7 @@ async function main() {
       getUploadsDir,
       transcribe,
       clearPendingTelegram,
+      flushPendingTelegram: (chatId) => flushPending(chatId, telegramBot),
       addPendingTelegram,
       getOwnerConfig,
       isOwner,

@@ -2,9 +2,8 @@
  * Tide test: run one Tide cycle (cron/run-tide.js) with temp state and assert we get a valid response.
  * Uses your real config + .env from ~/.cowcode so the LLM runs; typically finishes in 10–30s.
  *
- * For a quick manual check that Tide fires on an interval: set in ~/.cowcode/config.json
- *   "tide": { "enabled": true, "silenceCooldownMinutes": 0.0833, ... }
- * (0.0833 ≈ 5 seconds). Restart cowcode; Tide will run after ~5s of silence.
+ * Tide follow-up is scheduled when we reply to a private chat; after silenceCooldownMinutes
+ * with no user reply we send one follow-up, then stay quiet until the user messages again.
  *
  * Usage:
  *   node scripts/test/test-tide.js
