@@ -127,10 +127,24 @@ function buildParametersSchema(params) {
   const required = [];
   for (const [key, type] of Object.entries(params)) {
     const t = (type || 'string').toLowerCase();
-    properties[key] = {
-      type: t === 'object' || t === 'array' || t === 'number' || t === 'boolean' ? t : 'string',
-      description: key,
-    };
+    if (t === 'array') {
+      properties[key] = {
+        type: 'array',
+        description: key,
+        items: { type: 'string' },
+      };
+    } else if (t === 'object') {
+      properties[key] = {
+        type: 'object',
+        description: key,
+        additionalProperties: true,
+      };
+    } else {
+      properties[key] = {
+        type: t === 'number' || t === 'boolean' ? t : 'string',
+        description: key,
+      };
+    }
     required.push(key);
   }
   return { type: 'object', properties, required };
