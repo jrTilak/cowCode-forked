@@ -48,6 +48,7 @@ import { handleTelegramPrivateMessage } from './lib/telegram-private-handler.js'
 import { handleTelegramGroupMessage } from './lib/telegram-group-handler.js';
 import { ensureGroupConfigFor, readGroupMd } from './lib/group-config.js';
 import { loadGroupMd, buildGroupPromptBlock } from './lib/group-prompt.js';
+import { buildOneOnOneSystemPrompt } from './lib/system-prompt.js';
 import { getGroupDisplayName, setGroupDisplayName, parseSetDisplayNameMessage } from './lib/group-display-names.js';
 import { resetBrowseSession } from './lib/executors/browse.js';
 import { toUserMessage, getErrorMessageForLog } from './lib/user-error.js';
@@ -679,6 +680,19 @@ async function main() {
     return /^(y|yes|yeah|yep|sure|ok|okay|1|do it|please|go ahead|sounds good)$/.test(t) || t === 'yup';
   }
 
+  /** Persist config.bio to WhoAmI.md once when workspace has no identity files (same behavior as before shared prompt). */
+  function ensureBioPersistedToWhoAmI() {
+    if (readWorkspaceMd(WHO_AM_I_MD) || readWorkspaceMd(MY_HUMAN_MD)) return;
+    const bio = getBioFromConfig();
+    const bioText = typeof bio === 'string' && (bio || '').trim() ? bio.trim() : null;
+    if (!bioText) return;
+    try {
+      ensureStateDir();
+      const whoAmIPath = join(getWorkspaceDir(), WHO_AM_I_MD);
+      if (!existsSync(whoAmIPath)) writeFileSync(whoAmIPath, bioText, 'utf8');
+    } catch (_) {}
+  }
+
   function buildSystemPrompt(opts = {}) {
     const forGroup = !!opts.groupSenderName;
     const groupJid = opts.groupJid || 'default';
@@ -686,62 +700,28 @@ async function main() {
       ensureGroupConfigFor(groupJid);
     } else {
       ensureSoulMd();
+      ensureBioPersistedToWhoAmI();
+      return buildOneOnOneSystemPrompt();
     }
     const timeCtx = getSchedulingTimeContext();
     const timeBlock = `\n\n${timeCtx.timeContextLine}\nCurrent time UTC (for scheduling "at"): ${timeCtx.nowIso}. Examples: "in 1 minute" = ${timeCtx.in1min}; "in 2 minutes" = ${timeCtx.in2min}; "in 3 minutes" = ${timeCtx.in3min}.`;
-    const workspaceDir = forGroup ? getGroupDir(groupJid) : getWorkspaceDir();
-    const pathsLine = forGroup
-      ? ''
-      : `\n\nCowCode on this system: state dir ${getStateDir()}, workspace ${workspaceDir}. When the user asks where cowcode is installed or where config is, use the read skill with path \`~/.cowcode/config.json\` (or the state dir path above) to show config and confirm.`;
-    let soulContent = forGroup
-      ? (readGroupMd(SOUL_MD, groupJid) || readWorkspaceMd(SOUL_MD) || readDefaultSoul())
-      : (readWorkspaceMd(SOUL_MD) || readDefaultSoul()) + pathsLine;
-    if (forGroup) {
-      const loaded = loadGroupMd(getWorkspaceDir(), DEFAULT_WORKSPACE_DIR);
-      const groupBlock = buildGroupPromptBlock(loaded, {
-        groupSenderName: opts.groupSenderName,
-        groupMentioned: !!opts.groupMentioned,
-        groupNonOwner: !!opts.groupNonOwner,
-      });
-      if (groupBlock) soulContent += '\n\n' + groupBlock;
-    }
-    let whoAmIContent = forGroup ? readGroupMd(WHO_AM_I_MD, groupJid) : readWorkspaceMd(WHO_AM_I_MD);
-    const myHumanContent = forGroup ? readGroupMd(MY_HUMAN_MD, groupJid) : readWorkspaceMd(MY_HUMAN_MD);
-    if (!forGroup && !whoAmIContent && !myHumanContent) {
-      const bio = getBioFromConfig();
-      const bioText = typeof bio === 'string' && (bio || '').trim() ? bio.trim() : null;
-      if (bioText) {
-        try {
-          ensureStateDir();
-          const whoAmIPath = join(getWorkspaceDir(), WHO_AM_I_MD);
-          if (!existsSync(whoAmIPath)) {
-            writeFileSync(whoAmIPath, bioText, 'utf8');
-            whoAmIContent = bioText;
-          }
-        } catch (_) {}
-      }
-    }
+    const workspaceDir = getGroupDir(groupJid);
+    let soulContent = readGroupMd(SOUL_MD, groupJid) || readWorkspaceMd(SOUL_MD) || readDefaultSoul();
+    const loaded = loadGroupMd(getWorkspaceDir(), DEFAULT_WORKSPACE_DIR);
+    const groupBlock = buildGroupPromptBlock(loaded, {
+      groupSenderName: opts.groupSenderName,
+      groupMentioned: !!opts.groupMentioned,
+      groupNonOwner: !!opts.groupNonOwner,
+    });
+    if (groupBlock) soulContent += '\n\n' + groupBlock;
+    let whoAmIContent = readGroupMd(WHO_AM_I_MD, groupJid);
+    const myHumanContent = readGroupMd(MY_HUMAN_MD, groupJid);
     let identityBlock = '';
     if (whoAmIContent || myHumanContent) {
       if (whoAmIContent) identityBlock += '\n\n' + whoAmIContent;
       if (myHumanContent) identityBlock += '\n\n' + myHumanContent;
-    } else if (!forGroup) {
-      const bio = getBioFromConfig();
-      if (bio != null) {
-        if (typeof bio === 'string' && bio.trim()) {
-          identityBlock = '\n\n' + bio.trim();
-        } else if (typeof bio === 'object' && (bio.userName || bio.assistantName || bio.whoAmI || bio.whoAreYou)) {
-          const parts = [];
-          if (bio.userName) parts.push(`The user's name is ${bio.userName}.`);
-          if (bio.assistantName) parts.push(`Your name is ${bio.assistantName}.`);
-          if (bio.whoAmI) parts.push(`The user describes themselves: ${bio.whoAmI}.`);
-          if (bio.whoAreYou) parts.push(`You describe yourself: ${bio.whoAreYou}.`);
-          if (parts.length) identityBlock = '\n\n' + parts.join(' ');
-        }
-      }
     }
-    const base = soulContent + identityBlock;
-    return base + timeBlock;
+    return soulContent + identityBlock + timeBlock;
   }
 
   async function runAgentWithSkills(sock, jid, text, lastSentByJidMap, selfJidForCron, ourSentIdsRef, bioOpts = {}) {
