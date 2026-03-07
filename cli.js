@@ -233,6 +233,23 @@ if (sub === 'moo') {
           console.error('cowCode:', result.message);
           process.exit(1);
         }
+        const daemonScript = join(INSTALL_DIR, 'scripts', 'daemon.sh');
+        if (existsSync(daemonScript)) {
+          console.log('');
+          console.log('Restarting bot to apply skill changes...');
+          const restartResult = spawnSync('bash', [daemonScript, 'restart'], {
+            stdio: 'inherit',
+            env: { ...process.env, COWCODE_INSTALL_DIR: INSTALL_DIR },
+            cwd: INSTALL_DIR,
+          });
+          if (restartResult.status === 0) {
+            console.log('  ✓ Bot restarted.');
+          } else {
+            console.error('  ✗ Auto-restart failed. Run: cowcode moo restart');
+          }
+        } else {
+          console.log('Restart skipped (daemon script not found). Run: cowcode moo restart');
+        }
       } catch (err) {
         console.error('cowCode: skills install failed.', err?.message || err);
         process.exit(1);
